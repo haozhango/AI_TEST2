@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Job Console</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <main class="container">
+    <h1>Job Console</h1>
+
+    <section>
+      <div class="header-row">
+        <h2>New Jobs</h2>
+        <button id="addJobBtn" type="button">+ 新增条目</button>
+      </div>
+      <form id="newJobsForm">
+        <div id="newJobsList"></div>
+        <button id="submitBtn" type="submit">Submit</button>
+      </form>
+    </section>
+
+    <section>
+      <h2>Recent Jobs</h2>
+      <div id="recentJobs"></div>
+    </section>
+  </main>
+
+  <template id="newJobTemplate">
+    <div class="job-card">
+      <label>Bitfile <input name="bitfile" required /></label>
+      <label>Binfile <input name="binfile" /></label>
+      <label>Log Path <input name="log_path" placeholder="/tmp/job.log" /></label>
+
+      <details>
+        <summary>工具链配置</summary>
+        <div class="grid">
+          <label>UART1 <input name="uart1" /></label>
+          <label>UART2 <input name="uart2" /></label>
+          <label>UART3 <input name="uart3" /></label>
+          <label>UART4 <input name="uart4" /></label>
+          <label class="full">OpenODC Path <input name="openodc_path" placeholder="/opt/openocd/bin/openocd" /></label>
+        </div>
+      </details>
+
+      <button class="remove-btn" type="button">删除</button>
+    </div>
+  </template>
+
+  <script src="/static/main.js"></script>
+</body>
+</html>
