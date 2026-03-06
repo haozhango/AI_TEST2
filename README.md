@@ -31,7 +31,11 @@ pip install fastapi uvicorn
 uvicorn app:app --host 0.0.0.0 --port 8000
 ```
 
-访问：`http://127.0.0.1:8000`
+## 浏览器访问（Chrome / Firefox）
+
+- 在服务所在机器打开：`http://127.0.0.1:8000`
+- 在局域网其他机器打开：`http://<服务器IP>:8000`
+- 推荐使用最新版 **Google Chrome** 或 **Mozilla Firefox**
 
 ## API
 

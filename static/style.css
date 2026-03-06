@@ -1,6 +1,7 @@
 body { font-family: Arial, sans-serif; background: #f5f6f8; margin: 0; color: #222; }
 .container { max-width: 1000px; margin: 20px auto; background: #fff; padding: 20px; border-radius: 10px; }
 h1, h2 { margin: 0 0 12px; }
+.tip { margin: 0 0 16px; color: #444; background: #f0f4ff; border: 1px solid #d7e3ff; border-radius: 6px; padding: 8px 10px; }
 section { margin-bottom: 24px; }
 .header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
 .job-card { border: 1px solid #ddd; border-radius: 8px; padding: 12px; margin-bottom: 10px; background: #fafafa; }
