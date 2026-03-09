@@ -22,6 +22,12 @@
 12. Recent Jobs 记录提交时间与结束时间。
 13. Recent Jobs 支持 Copy 到 New Jobs。
 
+## Python 版本要求
+
+- **最低版本：Python 3.10**（`app.py` 使用了 `str | None`、`list[...]` 等较新类型标注语法）
+- **推荐版本：Python 3.11**
+- 可先执行 `python3 --version` 确认
+
 ## 你在自己环境上如何运行（推荐步骤）
 
 > 以下步骤适用于 Linux（CentOS 7 / Ubuntu / Debian 都可，命令略有差异）。
