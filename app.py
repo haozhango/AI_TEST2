@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import threading
 import uuid
@@ -17,15 +18,20 @@ from pydantic import BaseModel, Field
 APP_ROOT = Path(__file__).resolve().parent
 
 
+class OpenOcdCfgInput(BaseModel):
+    tool_path: str = ""
+    cfg_file: str = ""
+
+
 class JobInput(BaseModel):
+    jobs_id: str = ""
+    haps_platform: str = "BJ-HAPS80"
+    bitfile_mode: Literal["latest", "path"] = "path"
     bitfile: str = ""
     binfile: str = ""
     log_path: str = ""
-    openodc_path: str = ""
-    uart1: str = ""
-    uart2: str = ""
-    uart3: str = ""
-    uart4: str = ""
+    openocd_cfg: OpenOcdCfgInput = Field(default_factory=OpenOcdCfgInput)
+    uart_paths: list[str] = Field(default_factory=list)
 
 
 class SubmitJobsRequest(BaseModel):
@@ -50,19 +56,16 @@ class JobManager:
         self._lock = threading.Lock()
 
     def submit(self, payload: dict[str, Any]) -> JobRecord:
-        job_id = str(uuid.uuid4())
         now = datetime.now().isoformat(timespec="seconds")
         job = JobRecord(
-            id=job_id,
+            id=str(uuid.uuid4()),
             payload=payload,
             status="Runing",
             submit_time=now,
             message="job started",
         )
 
-        command = (
-            "python3 -c \"import time; time.sleep(20); print('job done')\""
-        )
+        command = "python3 -c \"import time; time.sleep(20); print('job done')\""
 
         log_path = payload.get("log_path", "").strip()
         if log_path:
@@ -81,10 +84,10 @@ class JobManager:
         job.process = process
 
         with self._lock:
-            self._jobs[job_id] = job
-            self._order.insert(0, job_id)
+            self._jobs[job.id] = job
+            self._order.insert(0, job.id)
 
-        threading.Thread(target=self._watch_job, args=(job_id,), daemon=True).start()
+        threading.Thread(target=self._watch_job, args=(job.id,), daemon=True).start()
         return job
 
     def _watch_job(self, job_id: str) -> None:
@@ -125,9 +128,9 @@ class JobManager:
 
         with self._lock:
             job = self._jobs[job_id]
-            job.status = "Stopped"
+            job.status = "Finish"
             job.end_time = datetime.now().isoformat(timespec="seconds")
-            job.message = "job stopped by user"
+            job.message = "job manually finished"
             return job
 
     def list_jobs(self) -> list[dict[str, Any]]:
@@ -146,6 +149,14 @@ class JobManager:
         }
 
 
+def build_jobs_id(jobs_id: str) -> str:
+    if jobs_id.strip():
+        return jobs_id
+    user = os.getenv("USER") or "user"
+    ts = datetime.now().strftime("%y%m%d%H%M%S")
+    return f"{user}_{ts}"
+
+
 app = FastAPI(title="Job Console")
 app.mount("/static", StaticFiles(directory=APP_ROOT / "static"), name="static")
 manager = JobManager()
@@ -154,6 +165,13 @@ manager = JobManager()
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(APP_ROOT / "static" / "index.html")
+
+
+
+
+@app.get("/api/session")
+def get_session() -> dict[str, str]:
+    return {"user": os.getenv("USER") or "user"}
 
 
 @app.get("/api/jobs")
@@ -169,12 +187,20 @@ def submit_jobs(request: SubmitJobsRequest) -> dict[str, Any]:
     created: list[dict[str, Any]] = []
     for item in request.jobs:
         data = json.loads(item.model_dump_json())
-        if not data.get("bitfile", "").strip():
+        data["jobs_id"] = build_jobs_id(data.get("jobs_id", ""))
+
+        bitfile_mode = data.get("bitfile_mode", "path")
+        bitfile_value = data.get("bitfile", "").strip()
+        if bitfile_mode == "path" and not bitfile_value:
             continue
+
+        if bitfile_mode == "latest":
+            data["bitfile"] = "GET_LATEST"
+
         created.append(manager._to_api(manager.submit(data)))
 
     if not created:
-        raise HTTPException(status_code=400, detail="at least one job needs bitfile")
+        raise HTTPException(status_code=400, detail="at least one job needs valid bitfile")
 
     return {"created": created}
 
