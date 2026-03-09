@@ -12,8 +12,8 @@
 
     <section class="panel panel-new">
       <div class="header-row">
-        <h2>New Jobs</h2>
-        <button id="addJobBtn" type="button">Add Job Items</button>
+        <h2>Create Jobs</h2>
+        <button id="addJobBtn" type="button">New</button>
       </div>
       <form id="newJobsForm">
         <div id="newJobsList"></div>
@@ -28,7 +28,7 @@
   </main>
 
   <template id="newJobTemplate">
-    <div class="job-card one-line">
+    <div class="job-card row-grid">
       <label class="field"><span class="key">JobsID</span><input name="jobs_id" readonly /></label>
       <label class="field"><span class="key">HAPS Platform</span>
         <select name="haps_platform">
@@ -37,24 +37,39 @@
           <option value="CD-HAPS100">CD-HAPS100</option>
         </select>
       </label>
-      <label class="field"><span class="key">Bitfile Mode</span>
-        <select name="bitfile_mode" class="bitfile-mode">
-          <option value="path">Input Path</option>
-          <option value="latest">Get Latest</option>
-        </select>
+
+      <label class="field bitfile-field">
+        <span class="key">Bitfile</span>
+        <div class="inline-control">
+          <input name="bitfile" class="bitfile-path" placeholder="/path/to/xxx.bit" />
+          <button type="button" class="mini-btn latest-btn">Get Latest</button>
+        </div>
       </label>
-      <label class="field bitfile-path-wrap"><span class="key">Bitfile</span><input name="bitfile" class="bitfile-path" placeholder="/path/to/xxx.bit" /></label>
-      <label class="field"><span class="key">Binfile</span><input name="binfile" class="binfile-path" placeholder="/path/to/xxx.bin" /></label>
-      <button type="button" class="browse-btn" data-target="binfile">Browse Binfile</button>
+
+      <label class="field binfile-field">
+        <span class="key">Binfile</span>
+        <div class="inline-control">
+          <input name="binfile" class="binfile-path" placeholder="/path/to/xxx.bin" />
+          <button type="button" class="mini-btn browse-btn">Browse</button>
+        </div>
+      </label>
+
       <label class="field"><span class="key">Log Path</span><input name="log_path" placeholder="/tmp/job.log" /></label>
-      <label class="field"><span class="key">OpenOCD Tool</span><input name="openocd_tool_path" placeholder="/opt/openocd/bin/openocd" /></label>
-      <label class="field"><span class="key">OpenOCD Cfg</span><input name="openocd_cfg_file" placeholder="/opt/openocd/board.cfg" /></label>
-      <div class="uart-group">
-        <span class="key">UART</span>
-        <div class="uart-list"></div>
-        <button type="button" class="add-uart-btn">+ UART</button>
+
+      <div class="field openocd-field">
+        <span class="key">OpenOCD Cfg</span>
+        <div class="stacked">
+          <input name="openocd_tool_path" placeholder="tool path: /opt/openocd/bin/openocd" />
+          <input name="openocd_cfg_file" placeholder="cfg file: /opt/openocd/board.cfg" />
+        </div>
       </div>
-      <button class="remove-btn" type="button">Remove</button>
+
+      <div class="field uart-field">
+        <button type="button" class="key key-btn add-uart-btn">UART +</button>
+        <div class="uart-list"></div>
+      </div>
+
+      <button class="remove-btn" type="button" title="Delete item">×</button>
     </div>
   </template>
 
