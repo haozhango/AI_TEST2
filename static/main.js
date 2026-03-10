@@ -35,10 +35,12 @@ function ensureFileBrowserModal() {
         <button type="button" class="file-browser-close">×</button>
       </div>
       <div class="file-browser-path-row">
-        <input class="file-browser-path" readonly />
+        <input class="file-browser-path" placeholder="/path/to/search" />
+        <button type="button" class="mini-btn file-browser-go">Go</button>
       </div>
       <div class="file-browser-list"></div>
       <div class="file-browser-actions">
+        <button type="button" class="mini-btn file-browser-use-path">Use This Path</button>
         <button type="button" class="mini-btn file-browser-cancel">Cancel</button>
       </div>
     </div>
@@ -62,9 +64,34 @@ function ensureFileBrowserModal() {
     overlay,
     pathInput: overlay.querySelector('.file-browser-path'),
     list: overlay.querySelector('.file-browser-list'),
+    goBtn: overlay.querySelector('.file-browser-go'),
+    usePathBtn: overlay.querySelector('.file-browser-use-path'),
     close,
   };
   return fileBrowserModal;
+}
+
+function findParentPath(pathValue) {
+  const normalized = (pathValue || '').trim();
+  if (!normalized) return '';
+  if (normalized === '/') return '/';
+
+  const clean = normalized.endsWith('/') && normalized.length > 1 ? normalized.slice(0, -1) : normalized;
+  const slashIndex = clean.lastIndexOf('/');
+  if (slashIndex <= 0) return '/';
+  return clean.slice(0, slashIndex);
+}
+
+async function loadFsEntriesWithFallback(path, mode) {
+  const trimmed = (path || '').trim();
+  try {
+    return await loadFsEntries(trimmed, mode);
+  } catch (error) {
+    if (!trimmed) throw error;
+    const fallbackPath = findParentPath(trimmed);
+    if (!fallbackPath || fallbackPath === trimmed) throw error;
+    return loadFsEntries(fallbackPath, mode);
+  }
 }
 
 async function loadFsEntries(path, mode) {
@@ -81,11 +108,11 @@ async function browseViaFileSystem(target, mode = 'file') {
   const modal = ensureFileBrowserModal();
   modal.overlay.style.display = 'flex';
   modal.overlay.dataset.mode = mode;
-  modal.overlay.dataset.targetInput = target.name || target.className;
+  modal.overlay.currentTarget = target;
 
   const render = async (path) => {
     modal.list.textContent = 'Loading...';
-    const data = await loadFsEntries(path || target.value || '', mode);
+    const data = await loadFsEntriesWithFallback(path || target.value || '', mode);
     modal.pathInput.value = data.cwd;
     modal.list.innerHTML = '';
 
@@ -112,8 +139,8 @@ async function browseViaFileSystem(target, mode = 'file') {
     if (data.parent) addEntryButton('..', data.parent, 'directory', 'fs-item fs-nav');
 
     data.entries.forEach((entry) => {
-      const icon = entry.type === 'directory' ? '📁' : '📄';
-      addEntryButton(`${icon} ${entry.name}`, entry.path, entry.type);
+      const prefix = entry.type === 'directory' ? '[DIR]' : '[FILE]';
+      addEntryButton(`${prefix} ${entry.name}`, entry.path, entry.type);
     });
 
     if (!data.entries.length && !data.parent) {
@@ -122,6 +149,21 @@ async function browseViaFileSystem(target, mode = 'file') {
       empty.textContent = '(empty)';
       modal.list.appendChild(empty);
     }
+  };
+
+  modal.goBtn.onclick = async () => {
+    await render(modal.pathInput.value);
+  };
+  modal.pathInput.onkeydown = async (event) => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    await render(modal.pathInput.value);
+  };
+  modal.usePathBtn.onclick = () => {
+    const nextValue = modal.pathInput.value.trim();
+    if (!nextValue) return;
+    target.value = nextValue;
+    modal.close();
   };
 
   try {
