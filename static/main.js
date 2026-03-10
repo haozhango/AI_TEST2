@@ -63,6 +63,30 @@ function bindFileSystemBrowse(card, btnSelector, inputSelector, mode = 'file') {
   });
 }
 
+function updateDbConfigState(card, key, enabled) {
+  const input = card.querySelector(`input[name="${key}"]`);
+  if (!input) return;
+  input.disabled = !enabled;
+  const browseMap = {
+    database_path: '.database-browse-btn',
+    reset_script: '.reset-browse-btn',
+    imgload_script: '.imgload-browse-btn',
+  };
+  const browseBtn = card.querySelector(browseMap[key]);
+  if (browseBtn) browseBtn.disabled = !enabled;
+}
+
+function bindDbConfigToggles(card, prefill = {}) {
+  card.querySelectorAll('.db-config-toggle').forEach((toggle) => {
+    const key = toggle.dataset.target;
+    const initialValue = prefill[key];
+    if (initialValue === 'auto') toggle.checked = false;
+
+    updateDbConfigState(card, key, toggle.checked);
+    toggle.addEventListener('change', () => updateDbConfigState(card, key, toggle.checked));
+  });
+}
+
 function createNewJobCard(prefill = {}, insertAfterNode = null) {
   const node = template.content.firstElementChild.cloneNode(true);
   node.querySelector('input[name="jobs_id"]').value = prefill.jobs_id || makeJobsId();
@@ -92,6 +116,7 @@ function createNewJobCard(prefill = {}, insertAfterNode = null) {
   bindFileSystemBrowse(node, '.database-browse-btn', '.database-path', 'directory');
   bindFileSystemBrowse(node, '.reset-browse-btn', '.reset-script-path', 'file');
   bindFileSystemBrowse(node, '.imgload-browse-btn', '.imgload-script-path', 'file');
+  bindDbConfigToggles(node, prefill);
 
   if (insertAfterNode && insertAfterNode.parentNode === newJobsList) {
     insertAfterNode.insertAdjacentElement('afterend', node);
@@ -106,9 +131,9 @@ function collectNewJobs() {
     return {
       jobs_id: card.querySelector('input[name="jobs_id"]').value.trim(),
       haps_platform: card.querySelector('select[name="haps_platform"]').value,
-      database_path: card.querySelector('input[name="database_path"]').value.trim() || 'auto',
-      reset_script: card.querySelector('input[name="reset_script"]').value.trim() || 'auto',
-      imgload_script: card.querySelector('input[name="imgload_script"]').value.trim() || 'auto',
+      database_path: card.querySelector('.db-config-toggle[data-target="database_path"]').checked ? (card.querySelector('input[name="database_path"]').value.trim() || 'auto') : 'auto',
+      reset_script: card.querySelector('.db-config-toggle[data-target="reset_script"]').checked ? (card.querySelector('input[name="reset_script"]').value.trim() || 'auto') : 'auto',
+      imgload_script: card.querySelector('.db-config-toggle[data-target="imgload_script"]').checked ? (card.querySelector('input[name="imgload_script"]').value.trim() || 'auto') : 'auto',
       binfile: card.querySelector('input[name="binfile"]').value.trim(),
       img_file: card.querySelector('input[name="img_file"]').value.trim(),
       log_path: card.querySelector('input[name="log_path"]').value.trim(),
