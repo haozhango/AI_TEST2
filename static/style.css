@@ -16,6 +16,9 @@ h1, h2 { margin: 0 0 12px; }
 .panel-recent { background: var(--recent-bg); border: 1px solid var(--recent-border); }
 .header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
 
+#newJobsForm { display: flex; flex-direction: column; gap: 10px; }
+.submit-row { display: flex; justify-content: flex-end; }
+
 .job-card, .recent-card { border: 1px solid #d8dde8; border-radius: 10px; padding: 12px; margin-bottom: 10px; background: #fff; }
 .row-grid {
   display: grid;
@@ -23,8 +26,11 @@ h1, h2 { margin: 0 0 12px; }
   gap: 10px;
   align-items: stretch;
 }
+.recent-card.row-grid {
+  grid-template-columns: repeat(4, minmax(165px, 1fr)) auto;
+}
 
-.field, .kv { display: flex; flex-direction: column; }
+.field, .kv { display: flex; flex-direction: column; gap: 6px; }
 .key {
   display: block;
   text-align: center;
@@ -36,8 +42,9 @@ h1, h2 { margin: 0 0 12px; }
   margin-bottom: 6px;
   font-size: 12px;
 }
-.panel-recent .key { background: var(--key-bg-recent); }
+.panel-recent .key { background: #ffb3ad; color: #7a1f16; }
 .panel-recent .val { font-size: 14px; }
+.panel-recent .kv .key, .panel-recent .kv .val { min-height: 38px; box-sizing: border-box; width: 100%; }
 .key-btn { border: none; cursor: pointer; }
 
 input, select, .val {
@@ -53,7 +60,7 @@ input, select, .val {
 
 .inline-control { display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: center; }
 .dropdown-wrap { position: relative; }
-.stacked { display: grid; grid-template-rows: 1fr 1fr; gap: 6px; }
+.stacked { display: grid; gap: 6px; }
 
 button { padding: 9px 12px; border: none; border-radius: 7px; cursor: pointer; background: #0a66ff; color: #fff; white-space: nowrap; }
 .mini-btn { padding: 8px 10px; }
@@ -62,7 +69,7 @@ button { padding: 9px 12px; border: none; border-radius: 7px; cursor: pointer; b
 .copy-btn { background: #dcfce7; color: #166534; }
 .finish-btn { background: #b54708; }
 
-.row-actions { display: flex; align-items: flex-start; justify-content: flex-end; gap: 6px; justify-self: end; padding-right: 0; margin-right: -2px; }
+.row-actions { display: flex; align-items: flex-start; justify-content: flex-end; gap: 6px; justify-self: end; padding-right: 0; margin-right: -4px; }
 .delete-btn, .add-btn { font-size: 18px; font-weight: 400; line-height: 1; padding: 0; background: transparent; border-radius: 0; min-height: auto; }
 .delete-btn { color: #dc2626; }
 .add-btn { color: #16a34a; }
@@ -71,7 +78,7 @@ button { padding: 9px 12px; border: none; border-radius: 7px; cursor: pointer; b
 .uart-item { display: grid; grid-template-columns: 1fr auto; gap: 6px; }
 .remove-uart-btn { background: transparent; color: #dc2626; font-size: 16px; font-weight: 400; padding: 0 6px; }
 
-.actions { display: flex; align-items: center; justify-content: space-evenly; gap: 10px; }
+.actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-left: auto; }
 .status.Runing { color: #0a66ff; font-weight: 700; }
 .status.Finish { color: #15803d; font-weight: 700; }
 .status.Stopped, .status.Failed { color: #a11; font-weight: 700; }
@@ -108,4 +115,3 @@ button { padding: 9px 12px; border: none; border-radius: 7px; cursor: pointer; b
 .hidden { display: none; }
 
 .browse-btn, .database-browse-btn, .reset-browse-btn, .imgload-browse-btn, .img-file-browse-btn { min-width: 38px; padding: 8px 10px; font-size: 16px; font-weight: 800; }
-.manual-option { color: #1d4ed8; font-weight: 700; }

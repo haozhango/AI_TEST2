@@ -16,7 +16,7 @@
       </div>
       <form id="newJobsForm">
         <div id="newJobsList"></div>
-        <button id="submitBtn" type="submit">Submit</button>
+        <div class="submit-row"><button id="submitBtn" type="submit">Submit</button></div>
       </form>
     </section>
 
@@ -41,21 +41,21 @@
         <span class="key">DataBase</span>
         <div class="stacked">
           <div class="inline-control">
-            <input name="database_path" class="database-path" placeholder="DataBase Path (auto)" value="auto" />
+            <input name="database_path" class="database-path" placeholder="DataBase Path (auto)" />
             <div class="dropdown-wrap">
               <button type="button" class="mini-btn database-browse-btn" title="Browse DataBase path">▾</button>
               <div class="directory-menu database-menu hidden"></div>
             </div>
           </div>
           <div class="inline-control">
-            <input name="reset_script" class="reset-script-path" placeholder="Reset Script Path (auto)" value="auto" />
+            <input name="reset_script" class="reset-script-path" placeholder="Reset Script Path (auto)" />
             <div class="dropdown-wrap">
               <button type="button" class="mini-btn reset-browse-btn" title="Browse reset script path">▾</button>
               <div class="directory-menu reset-menu hidden"></div>
             </div>
           </div>
           <div class="inline-control">
-            <input name="imgload_script" class="imgload-script-path" placeholder="ImgLoad Script Path (auto)" value="auto" />
+            <input name="imgload_script" class="imgload-script-path" placeholder="ImgLoad Script Path (auto)" />
             <div class="dropdown-wrap">
               <button type="button" class="mini-btn imgload-browse-btn" title="Browse imgload script path">▾</button>
               <div class="directory-menu imgload-menu hidden"></div>

@@ -53,14 +53,6 @@ function bindPathBrowse(card, btnSelector, inputSelector, menuSelector, includeA
       });
     }
 
-    addMenuOption('Browse any path…', () => {
-      const entered = window.prompt('Enter path:', target.value || '');
-      if (entered !== null) {
-        const path = entered.trim();
-        if (path) target.value = path;
-      }
-    }, 'manual-option');
-
     directoryOptions.forEach((path) => {
       addMenuOption(path, () => {
         target.value = path;
@@ -87,9 +79,9 @@ function createNewJobCard(prefill = {}, insertAfterNode = null) {
   const node = template.content.firstElementChild.cloneNode(true);
   node.querySelector('input[name="jobs_id"]').value = prefill.jobs_id || makeJobsId();
   node.querySelector('select[name="haps_platform"]').value = prefill.haps_platform || 'BJ-HAPS80';
-  node.querySelector('input[name="database_path"]').value = prefill.database_path || 'auto';
-  node.querySelector('input[name="reset_script"]').value = prefill.reset_script || 'auto';
-  node.querySelector('input[name="imgload_script"]').value = prefill.imgload_script || 'auto';
+  node.querySelector('input[name="database_path"]').value = prefill.database_path && prefill.database_path !== 'auto' ? prefill.database_path : '';
+  node.querySelector('input[name="reset_script"]').value = prefill.reset_script && prefill.reset_script !== 'auto' ? prefill.reset_script : '';
+  node.querySelector('input[name="imgload_script"]').value = prefill.imgload_script && prefill.imgload_script !== 'auto' ? prefill.imgload_script : '';
   node.querySelector('input[name="binfile"]').value = prefill.binfile || '';
   node.querySelector('input[name="img_file"]').value = prefill.img_file || '';
   node.querySelector('input[name="log_path"]').value = prefill.log_path || '';
