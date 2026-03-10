@@ -26,14 +26,16 @@ function closeAllDirectoryMenus() {
   document.querySelectorAll('.directory-menu').forEach((menu) => menu.classList.add('hidden'));
 }
 
-function bindBinfileBrowse(card) {
-  const btn = card.querySelector('.browse-btn');
-  const target = card.querySelector('.binfile-path');
-  const menu = card.querySelector('.directory-menu');
+function bindPathBrowse(card, btnSelector, inputSelector, menuSelector) {
+  const btn = card.querySelector(btnSelector);
+  const target = card.querySelector(inputSelector);
+  const menu = card.querySelector(menuSelector);
+  if (!btn || !target || !menu) return;
 
   function renderMenu() {
     menu.innerHTML = '';
-    directoryOptions.forEach((path) => {
+    const options = ['auto', ...directoryOptions];
+    options.forEach((path) => {
       const option = document.createElement('button');
       option.type = 'button';
       option.className = 'directory-option';
@@ -83,7 +85,9 @@ function createNewJobCard(prefill = {}, insertAfterNode = null) {
   });
   node.querySelector('.add-btn').addEventListener('click', () => createNewJobCard({}, node));
 
-  bindBinfileBrowse(node);
+  bindPathBrowse(node, '.browse-btn', '.binfile-path', '.binfile-menu');
+  bindPathBrowse(node, '.database-browse-btn', '.database-path', '.database-menu');
+  bindPathBrowse(node, '.reset-browse-btn', '.reset-script-path', '.reset-menu');
 
   if (insertAfterNode && insertAfterNode.parentNode === newJobsList) {
     insertAfterNode.insertAdjacentElement('afterend', node);

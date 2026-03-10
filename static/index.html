@@ -37,15 +37,25 @@
         </select>
       </label>
 
-      <label class="field database-field">
+      <div class="field database-field">
         <span class="key">DataBase</span>
-        <input name="database_path" class="database-path" placeholder="auto" value="auto" />
-      </label>
-
-      <label class="field reset-script-field">
-        <span class="key">reset script</span>
-        <input name="reset_script" placeholder="auto" value="auto" />
-      </label>
+        <div class="stacked">
+          <div class="inline-control">
+            <input name="database_path" class="database-path" placeholder="auto" value="auto" />
+            <div class="dropdown-wrap">
+              <button type="button" class="mini-btn database-browse-btn">▾</button>
+              <div class="directory-menu database-menu hidden"></div>
+            </div>
+          </div>
+          <div class="inline-control">
+            <input name="reset_script" class="reset-script-path" placeholder="auto" value="auto" />
+            <div class="dropdown-wrap">
+              <button type="button" class="mini-btn reset-browse-btn">▾</button>
+              <div class="directory-menu reset-menu hidden"></div>
+            </div>
+          </div>
+        </div>
+      </div>
 
       <label class="field binfile-field">
         <span class="key">Binfile</span>
@@ -53,7 +63,7 @@
           <input name="binfile" class="binfile-path" placeholder="/path/to/xxx.bin" />
           <div class="dropdown-wrap">
             <button type="button" class="mini-btn browse-btn">▾</button>
-            <div class="directory-menu hidden"></div>
+            <div class="directory-menu binfile-menu hidden"></div>
           </div>
         </div>
       </label>
