@@ -37,12 +37,14 @@
         </select>
       </label>
 
-      <label class="field bitfile-field">
+      <label class="field database-field">
         <span class="key">DataBase</span>
-        <div class="inline-control">
-          <input name="bitfile" class="bitfile-path" placeholder="/path/to/xxx.bit" />
-          <button type="button" class="mini-btn latest-btn">Get Latest</button>
-        </div>
+        <input name="database_path" class="database-path" placeholder="auto" value="auto" />
+      </label>
+
+      <label class="field reset-script-field">
+        <span class="key">reset script</span>
+        <input name="reset_script" placeholder="auto" value="auto" />
       </label>
 
       <label class="field binfile-field">
@@ -67,13 +69,13 @@
       </div>
 
       <div class="field uart-field">
-        <button type="button" class="key key-btn add-uart-btn">UART +</button>
+        <button type="button" class="key key-btn add-uart-btn">UART</button>
         <div class="uart-list"></div>
       </div>
 
       <div class="row-actions">
-        <button class="minus-btn" type="button" title="Delete item">-</button>
-        <button class="plus-btn" type="button" title="Add next item">+</button>
+        <button class="delete-btn" type="button" title="Delete item">×</button>
+        <button class="add-btn" type="button" title="Add next item">+</button>
       </div>
     </div>
   </template>
@@ -81,7 +83,7 @@
   <template id="uartTemplate">
     <div class="uart-item">
       <input class="uart-input" placeholder="/dev/ttyUSB0" />
-      <button type="button" class="remove-uart-btn">-</button>
+      <button type="button" class="remove-uart-btn">×</button>
     </div>
   </template>
 
