@@ -139,7 +139,7 @@ async function browseViaFileSystem(target, mode = 'file') {
     if (data.parent) addEntryButton('..', data.parent, 'directory', 'fs-item fs-nav');
 
     data.entries.forEach((entry) => {
-      const prefix = entry.type === 'directory' ? '[DIR]' : '[FILE]';
+      const prefix = entry.type === 'directory' ? '\u{1F5C2}' : '\u{1F4C4}';
       addEntryButton(`${prefix} ${entry.name}`, entry.path, entry.type);
     });
 
