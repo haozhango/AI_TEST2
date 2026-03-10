@@ -28,7 +28,9 @@ class JobInput(BaseModel):
     haps_platform: str = "BJ-HAPS80"
     database_path: str = "auto"
     reset_script: str = "auto"
+    imgload_script: str = "auto"
     binfile: str = ""
+    img_file: str = ""
     log_path: str = ""
     openocd_cfg: OpenOcdCfgInput = Field(default_factory=OpenOcdCfgInput)
     uart_paths: list[str] = Field(default_factory=list)

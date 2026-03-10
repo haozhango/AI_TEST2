@@ -26,25 +26,45 @@ function closeAllDirectoryMenus() {
   document.querySelectorAll('.directory-menu').forEach((menu) => menu.classList.add('hidden'));
 }
 
-function bindPathBrowse(card, btnSelector, inputSelector, menuSelector) {
+function bindPathBrowse(card, btnSelector, inputSelector, menuSelector, includeAuto = true) {
   const btn = card.querySelector(btnSelector);
   const target = card.querySelector(inputSelector);
   const menu = card.querySelector(menuSelector);
   if (!btn || !target || !menu) return;
 
+  function addMenuOption(label, onClick, extraClass = '') {
+    const option = document.createElement('button');
+    option.type = 'button';
+    option.className = `directory-option ${extraClass}`.trim();
+    option.textContent = label;
+    option.addEventListener('click', () => {
+      onClick();
+      menu.classList.add('hidden');
+    });
+    menu.appendChild(option);
+  }
+
   function renderMenu() {
     menu.innerHTML = '';
-    const options = ['auto', ...directoryOptions];
-    options.forEach((path) => {
-      const option = document.createElement('button');
-      option.type = 'button';
-      option.className = 'directory-option';
-      option.textContent = path;
-      option.addEventListener('click', () => {
-        target.value = path;
-        menu.classList.add('hidden');
+
+    if (includeAuto) {
+      addMenuOption('auto', () => {
+        target.value = 'auto';
       });
-      menu.appendChild(option);
+    }
+
+    addMenuOption('Browse any path…', () => {
+      const entered = window.prompt('Enter path:', target.value || '');
+      if (entered !== null) {
+        const path = entered.trim();
+        if (path) target.value = path;
+      }
+    }, 'manual-option');
+
+    directoryOptions.forEach((path) => {
+      addMenuOption(path, () => {
+        target.value = path;
+      });
     });
   }
 
@@ -69,7 +89,9 @@ function createNewJobCard(prefill = {}, insertAfterNode = null) {
   node.querySelector('select[name="haps_platform"]').value = prefill.haps_platform || 'BJ-HAPS80';
   node.querySelector('input[name="database_path"]').value = prefill.database_path || 'auto';
   node.querySelector('input[name="reset_script"]').value = prefill.reset_script || 'auto';
+  node.querySelector('input[name="imgload_script"]').value = prefill.imgload_script || 'auto';
   node.querySelector('input[name="binfile"]').value = prefill.binfile || '';
+  node.querySelector('input[name="img_file"]').value = prefill.img_file || '';
   node.querySelector('input[name="log_path"]').value = prefill.log_path || '';
 
   const openocdCfg = prefill.openocd_cfg || {};
@@ -85,9 +107,11 @@ function createNewJobCard(prefill = {}, insertAfterNode = null) {
   });
   node.querySelector('.add-btn').addEventListener('click', () => createNewJobCard({}, node));
 
-  bindPathBrowse(node, '.browse-btn', '.binfile-path', '.binfile-menu');
+  bindPathBrowse(node, '.browse-btn', '.binfile-path', '.binfile-menu', false);
+  bindPathBrowse(node, '.img-file-browse-btn', '.img-file-path', '.img-file-menu', false);
   bindPathBrowse(node, '.database-browse-btn', '.database-path', '.database-menu');
   bindPathBrowse(node, '.reset-browse-btn', '.reset-script-path', '.reset-menu');
+  bindPathBrowse(node, '.imgload-browse-btn', '.imgload-script-path', '.imgload-menu');
 
   if (insertAfterNode && insertAfterNode.parentNode === newJobsList) {
     insertAfterNode.insertAdjacentElement('afterend', node);
@@ -104,7 +128,9 @@ function collectNewJobs() {
       haps_platform: card.querySelector('select[name="haps_platform"]').value,
       database_path: card.querySelector('input[name="database_path"]').value.trim() || 'auto',
       reset_script: card.querySelector('input[name="reset_script"]').value.trim() || 'auto',
+      imgload_script: card.querySelector('input[name="imgload_script"]').value.trim() || 'auto',
       binfile: card.querySelector('input[name="binfile"]').value.trim(),
+      img_file: card.querySelector('input[name="img_file"]').value.trim(),
       log_path: card.querySelector('input[name="log_path"]').value.trim(),
       openocd_cfg: {
         tool_path: card.querySelector('input[name="openocd_tool_path"]').value.trim(),
