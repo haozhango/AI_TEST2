@@ -41,18 +41,21 @@
         <span class="key">DataBase</span>
         <div class="stacked">
           <div class="inline-control">
+            <label class="config-toggle"><input type="checkbox" class="db-config-toggle" data-target="database_path" checked />启用</label>
             <input name="database_path" class="database-path" placeholder="DataBase Path (auto)" />
             <div class="dropdown-wrap">
               <button type="button" class="mini-btn database-browse-btn" title="Browse DataBase path">▾</button>
             </div>
           </div>
           <div class="inline-control">
+            <label class="config-toggle"><input type="checkbox" class="db-config-toggle" data-target="reset_script" checked />启用</label>
             <input name="reset_script" class="reset-script-path" placeholder="Reset Script Path (auto)" />
             <div class="dropdown-wrap">
               <button type="button" class="mini-btn reset-browse-btn" title="Browse reset script path">▾</button>
             </div>
           </div>
           <div class="inline-control">
+            <label class="config-toggle"><input type="checkbox" class="db-config-toggle" data-target="imgload_script" checked />启用</label>
             <input name="imgload_script" class="imgload-script-path" placeholder="ImgLoad Script Path (auto)" />
             <div class="dropdown-wrap">
               <button type="button" class="mini-btn imgload-browse-btn" title="Browse imgload script path">▾</button>
@@ -62,7 +65,7 @@
       </div>
 
       <div class="field binfile-field">
-        <span class="key">Binfile</span>
+        <span class="key">BinFile</span>
         <div class="stacked">
           <div class="inline-control">
             <input name="binfile" class="binfile-path" placeholder="/path/to/xxx.bin" />
