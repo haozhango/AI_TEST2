@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import pwd
+import socket
 import subprocess
 import threading
 import uuid
@@ -401,12 +402,27 @@ def build_jobs_id(jobs_id: str, user_id: str = "") -> str:
 
 
 def get_system_user(request: Request | None = None) -> str:
-    """Resolve user id from request headers first, then Linux account info."""
+    """Resolve user id from request headers, then request socket owner, then service account."""
     if request is not None:
         for key in ("x-linux-user", "x-remote-user", "remote-user", "x-user", "x-auth-request-user"):
             value = (request.headers.get(key) or "").strip()
             if value:
                 return value
+
+        # On shared Linux hosts, requests usually come from localhost. In that case we can
+        # map the client socket to the kernel-recorded UID in /proc/net/tcp* to identify the
+        # actual login user instead of the account that started this FastAPI service.
+        client = request.client
+        local_host = request.url.hostname or ""
+        if client and client.port:
+            user = _get_local_socket_user(
+                local_host=local_host,
+                local_port=request.url.port,
+                remote_host=client.host,
+                remote_port=client.port,
+            )
+            if user:
+                return user
 
     try:
         user = os.getlogin().strip()
@@ -424,6 +440,64 @@ def get_system_user(request: Request | None = None) -> str:
         return pwd.getpwuid(os.getuid()).pw_name
     except KeyError:
         return "user"
+
+
+def _is_loopback_host(host: str) -> bool:
+    normalized = (host or "").strip().lower()
+    return normalized in {"127.0.0.1", "::1", "localhost"}
+
+
+def _ipv4_hex(host: str) -> str:
+    packed = socket.inet_aton(host)
+    # /proc/net/tcp stores IPv4 bytes in little-endian order.
+    return packed[::-1].hex().upper()
+
+
+def _parse_proc_tcp_uid(
+    table_path: str,
+    local_hex: str,
+    local_port: int,
+    remote_hex: str,
+    remote_port: int,
+) -> int | None:
+    try:
+        with open(table_path, encoding="utf-8") as handle:
+            next(handle, None)
+            local_port_hex = f"{local_port:04X}"
+            remote_port_hex = f"{remote_port:04X}"
+            target_local = f"{local_hex}:{local_port_hex}"
+            target_remote = f"{remote_hex}:{remote_port_hex}"
+            for line in handle:
+                fields = line.split()
+                if len(fields) < 8:
+                    continue
+                if fields[1] != target_local or fields[2] != target_remote:
+                    continue
+                try:
+                    return int(fields[7])
+                except ValueError:
+                    return None
+    except OSError:
+        return None
+    return None
+
+
+def _get_local_socket_user(local_host: str, local_port: int | None, remote_host: str, remote_port: int) -> str | None:
+    if not local_port:
+        return None
+    if not (_is_loopback_host(local_host) and _is_loopback_host(remote_host)):
+        return None
+
+    # We only match IPv4 localhost here; if service is accessed via IPv6 (::1), fallback logic applies.
+    local_hex = _ipv4_hex("127.0.0.1")
+    remote_hex = _ipv4_hex("127.0.0.1")
+    uid = _parse_proc_tcp_uid("/proc/net/tcp", local_hex, local_port, remote_hex, remote_port)
+    if uid is None:
+        return None
+    try:
+        return pwd.getpwuid(uid).pw_name
+    except KeyError:
+        return None
 
 
 app = FastAPI(title="HAPS Jobs Console Platform")
