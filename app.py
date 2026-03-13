@@ -411,20 +411,19 @@ def _uid_to_username(uid: int | None) -> str | None:
 
 
 def get_system_user_id(request: Request | None = None) -> str:
-    """Resolve numeric linux user id from request headers/socket, then service account."""
+    """Resolve stable user identity based on linux login name (whoami style)."""
     if request is not None:
-        for key in ("x-linux-uid", "x-user-id", "x-auth-request-uid"):
-            value = (request.headers.get(key) or "").strip()
-            if value.isdigit():
-                return value
-
         for key in ("x-linux-user", "x-remote-user", "remote-user", "x-user", "x-auth-request-user"):
             value = (request.headers.get(key) or "").strip()
             if value:
-                try:
-                    return str(pwd.getpwnam(value).pw_uid)
-                except KeyError:
-                    continue
+                return value
+
+        for key in ("x-linux-uid", "x-user-id", "x-auth-request-uid"):
+            value = (request.headers.get(key) or "").strip()
+            if value.isdigit():
+                username = _uid_to_username(int(value))
+                if username:
+                    return username
 
         # On shared Linux hosts, requests usually come from localhost. In that case we can
         # map the client socket to the kernel-recorded UID in /proc/net/tcp* to identify the
@@ -438,19 +437,14 @@ def get_system_user_id(request: Request | None = None) -> str:
                 remote_host=client.host,
                 remote_port=client.port,
             )
-            if uid is not None:
-                return str(uid)
+            username = _uid_to_username(uid)
+            if username:
+                return username
 
-    return str(os.getuid())
+    return get_system_user(None)
 
 
 def get_system_user(request: Request | None = None) -> str:
-    user_id = get_system_user_id(request)
-    if user_id.isdigit():
-        username = _uid_to_username(int(user_id))
-        if username:
-            return username
-
     try:
         user = os.getlogin().strip()
         if user:
@@ -612,10 +606,10 @@ def submit_jobs(payload: SubmitJobsRequest, request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="jobs cannot be empty")
 
     created: list[dict[str, Any]] = []
-    system_user_id = get_system_user_id(request)
+    system_user = get_system_user_id(request)
     for item in payload.jobs:
         data = json.loads(item.model_dump_json())
-        data["user_id"] = system_user_id
+        data["user_id"] = system_user
         data["jobs_id"] = build_jobs_id(data.get("jobs_id", ""), data["user_id"])
         data["log_info"] = build_log_info(data.get("log_path", ""))
         try:
