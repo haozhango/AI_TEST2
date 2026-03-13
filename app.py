@@ -401,13 +401,30 @@ def build_jobs_id(jobs_id: str, user_id: str = "") -> str:
     return f"{user}_{ts}"
 
 
-def get_system_user(request: Request | None = None) -> str:
-    """Resolve user id from request headers, then request socket owner, then service account."""
+def _uid_to_username(uid: int | None) -> str | None:
+    if uid is None:
+        return None
+    try:
+        return pwd.getpwuid(uid).pw_name
+    except KeyError:
+        return None
+
+
+def get_system_user_id(request: Request | None = None) -> str:
+    """Resolve numeric linux user id from request headers/socket, then service account."""
     if request is not None:
+        for key in ("x-linux-uid", "x-user-id", "x-auth-request-uid"):
+            value = (request.headers.get(key) or "").strip()
+            if value.isdigit():
+                return value
+
         for key in ("x-linux-user", "x-remote-user", "remote-user", "x-user", "x-auth-request-user"):
             value = (request.headers.get(key) or "").strip()
             if value:
-                return value
+                try:
+                    return str(pwd.getpwnam(value).pw_uid)
+                except KeyError:
+                    continue
 
         # On shared Linux hosts, requests usually come from localhost. In that case we can
         # map the client socket to the kernel-recorded UID in /proc/net/tcp* to identify the
@@ -415,14 +432,24 @@ def get_system_user(request: Request | None = None) -> str:
         client = request.client
         local_host = request.url.hostname or ""
         if client and client.port:
-            user = _get_local_socket_user(
+            uid = _get_local_socket_uid(
                 local_host=local_host,
                 local_port=request.url.port,
                 remote_host=client.host,
                 remote_port=client.port,
             )
-            if user:
-                return user
+            if uid is not None:
+                return str(uid)
+
+    return str(os.getuid())
+
+
+def get_system_user(request: Request | None = None) -> str:
+    user_id = get_system_user_id(request)
+    if user_id.isdigit():
+        username = _uid_to_username(int(user_id))
+        if username:
+            return username
 
     try:
         user = os.getlogin().strip()
@@ -482,7 +509,7 @@ def _parse_proc_tcp_uid(
     return None
 
 
-def _get_local_socket_user(local_host: str, local_port: int | None, remote_host: str, remote_port: int) -> str | None:
+def _get_local_socket_uid(local_host: str, local_port: int | None, remote_host: str, remote_port: int) -> int | None:
     if not local_port:
         return None
     if not (_is_loopback_host(local_host) and _is_loopback_host(remote_host)):
@@ -492,12 +519,7 @@ def _get_local_socket_user(local_host: str, local_port: int | None, remote_host:
     local_hex = _ipv4_hex("127.0.0.1")
     remote_hex = _ipv4_hex("127.0.0.1")
     uid = _parse_proc_tcp_uid("/proc/net/tcp", local_hex, local_port, remote_hex, remote_port)
-    if uid is None:
-        return None
-    try:
-        return pwd.getpwuid(uid).pw_name
-    except KeyError:
-        return None
+    return uid
 
 
 app = FastAPI(title="HAPS Jobs Console Platform")
@@ -514,7 +536,10 @@ def index() -> FileResponse:
 
 @app.get("/api/session")
 def get_session(request: Request) -> dict[str, str]:
-    return {"user": get_system_user(request)}
+    return {
+        "user": get_system_user(request),
+        "user_id": get_system_user_id(request),
+    }
 
 
 
@@ -587,10 +612,10 @@ def submit_jobs(payload: SubmitJobsRequest, request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="jobs cannot be empty")
 
     created: list[dict[str, Any]] = []
-    system_user = get_system_user(request)
+    system_user_id = get_system_user_id(request)
     for item in payload.jobs:
         data = json.loads(item.model_dump_json())
-        data["user_id"] = str(data.get("user_id") or system_user)
+        data["user_id"] = system_user_id
         data["jobs_id"] = build_jobs_id(data.get("jobs_id", ""), data["user_id"])
         data["log_info"] = build_log_info(data.get("log_path", ""))
         try:
