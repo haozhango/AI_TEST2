@@ -510,10 +510,16 @@ def _get_local_socket_uid(local_host: str, local_port: int | None, remote_host: 
         return None
 
     # We only match IPv4 localhost here; if service is accessed via IPv6 (::1), fallback logic applies.
-    local_hex = _ipv4_hex("127.0.0.1")
-    remote_hex = _ipv4_hex("127.0.0.1")
-    uid = _parse_proc_tcp_uid("/proc/net/tcp", local_hex, local_port, remote_hex, remote_port)
-    return uid
+    loopback_hex = _ipv4_hex("127.0.0.1")
+
+    # Prefer client side socket entry (local=client_port, remote=server_port),
+    # because its UID belongs to the user's browser/process rather than uvicorn.
+    client_uid = _parse_proc_tcp_uid("/proc/net/tcp", loopback_hex, remote_port, loopback_hex, local_port)
+    if client_uid is not None:
+        return client_uid
+
+    # Fallback to server side entry if client side is not found.
+    return _parse_proc_tcp_uid("/proc/net/tcp", loopback_hex, local_port, loopback_hex, remote_port)
 
 
 app = FastAPI(title="HAPS Jobs Console Platform")
