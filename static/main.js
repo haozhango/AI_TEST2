@@ -7,12 +7,13 @@ const form = document.getElementById('newJobsForm');
 const jobsDurationMinutes = document.getElementById('jobsDurationMinutes');
 const autoFinishEnabled = document.getElementById('autoFinishEnabled');
 let currentUser = 'user';
+let currentUserId = '0';
 
 function makeJobsId() {
   const now = new Date();
   const pad = (v) => String(v).padStart(2, '0');
   const ts = `${pad(now.getFullYear() % 100)}${pad(now.getMonth() + 1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-  return `${currentUser}_${ts}`;
+  return `${currentUserId}_${ts}`;
 }
 
 function addUartItem(card, value = '') {
@@ -316,7 +317,7 @@ function collectNewJobs() {
       uart_paths: uartPaths,
       duration_minutes: Number.parseInt(jobsDurationMinutes.value, 10) || 10,
       auto_finish: autoFinishEnabled.checked,
-      user_id: currentUser,
+      user_id: currentUserId,
     };
   });
 }
@@ -355,7 +356,7 @@ function formatWait(seconds) {
 }
 
 async function cancelWaitingJob(waitingId) {
-  const response = await fetch(`/api/waiting-jobs/${waitingId}?user_id=${encodeURIComponent(currentUser)}`, { method: 'DELETE' });
+  const response = await fetch(`/api/waiting-jobs/${waitingId}?user_id=${encodeURIComponent(currentUserId)}`, { method: 'DELETE' });
   if (!response.ok) return alert(`Cancel failed: ${await response.text()}`);
   refreshWaitingJobs();
 }
@@ -377,7 +378,7 @@ function renderWaitingJobs(jobs) {
     `;
 
     const actions = item.querySelector('.waiting-actions');
-    if ((payload.user_id || '') === currentUser) {
+    if ((payload.user_id || '') === currentUserId) {
       const delBtn = document.createElement('button');
       delBtn.type = 'button';
       delBtn.className = 'delete-btn';
@@ -460,7 +461,11 @@ async function refreshRecentJobs() {
 async function bootstrap() {
   try {
     const sessionResp = await fetch('/api/session');
-    if (sessionResp.ok) currentUser = (await sessionResp.json()).user || 'user';
+    if (sessionResp.ok) {
+      const session = await sessionResp.json();
+      currentUser = session.user || 'user';
+      currentUserId = session.user_id || currentUserId;
+    }
   } catch (_) {}
 
   initJobsTimingSettings();

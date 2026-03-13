@@ -401,13 +401,29 @@ def build_jobs_id(jobs_id: str, user_id: str = "") -> str:
     return f"{user}_{ts}"
 
 
-def get_system_user(request: Request | None = None) -> str:
-    """Resolve user id from request headers, then request socket owner, then service account."""
+def _uid_to_username(uid: int | None) -> str | None:
+    if uid is None:
+        return None
+    try:
+        return pwd.getpwuid(uid).pw_name
+    except KeyError:
+        return None
+
+
+def get_system_user_id(request: Request | None = None) -> str:
+    """Resolve stable user identity based on linux login name (whoami style)."""
     if request is not None:
         for key in ("x-linux-user", "x-remote-user", "remote-user", "x-user", "x-auth-request-user"):
             value = (request.headers.get(key) or "").strip()
             if value:
                 return value
+
+        for key in ("x-linux-uid", "x-user-id", "x-auth-request-uid"):
+            value = (request.headers.get(key) or "").strip()
+            if value.isdigit():
+                username = _uid_to_username(int(value))
+                if username:
+                    return username
 
         # On shared Linux hosts, requests usually come from localhost. In that case we can
         # map the client socket to the kernel-recorded UID in /proc/net/tcp* to identify the
@@ -415,15 +431,20 @@ def get_system_user(request: Request | None = None) -> str:
         client = request.client
         local_host = request.url.hostname or ""
         if client and client.port:
-            user = _get_local_socket_user(
+            uid = _get_local_socket_uid(
                 local_host=local_host,
                 local_port=request.url.port,
                 remote_host=client.host,
                 remote_port=client.port,
             )
-            if user:
-                return user
+            username = _uid_to_username(uid)
+            if username:
+                return username
 
+    return get_system_user(None)
+
+
+def get_system_user(request: Request | None = None) -> str:
     try:
         user = os.getlogin().strip()
         if user:
@@ -482,22 +503,23 @@ def _parse_proc_tcp_uid(
     return None
 
 
-def _get_local_socket_user(local_host: str, local_port: int | None, remote_host: str, remote_port: int) -> str | None:
+def _get_local_socket_uid(local_host: str, local_port: int | None, remote_host: str, remote_port: int) -> int | None:
     if not local_port:
         return None
     if not (_is_loopback_host(local_host) and _is_loopback_host(remote_host)):
         return None
 
     # We only match IPv4 localhost here; if service is accessed via IPv6 (::1), fallback logic applies.
-    local_hex = _ipv4_hex("127.0.0.1")
-    remote_hex = _ipv4_hex("127.0.0.1")
-    uid = _parse_proc_tcp_uid("/proc/net/tcp", local_hex, local_port, remote_hex, remote_port)
-    if uid is None:
-        return None
-    try:
-        return pwd.getpwuid(uid).pw_name
-    except KeyError:
-        return None
+    loopback_hex = _ipv4_hex("127.0.0.1")
+
+    # Prefer client side socket entry (local=client_port, remote=server_port),
+    # because its UID belongs to the user's browser/process rather than uvicorn.
+    client_uid = _parse_proc_tcp_uid("/proc/net/tcp", loopback_hex, remote_port, loopback_hex, local_port)
+    if client_uid is not None:
+        return client_uid
+
+    # Fallback to server side entry if client side is not found.
+    return _parse_proc_tcp_uid("/proc/net/tcp", loopback_hex, local_port, loopback_hex, remote_port)
 
 
 app = FastAPI(title="HAPS Jobs Console Platform")
@@ -514,7 +536,10 @@ def index() -> FileResponse:
 
 @app.get("/api/session")
 def get_session(request: Request) -> dict[str, str]:
-    return {"user": get_system_user(request)}
+    return {
+        "user": get_system_user(request),
+        "user_id": get_system_user_id(request),
+    }
 
 
 
@@ -587,10 +612,10 @@ def submit_jobs(payload: SubmitJobsRequest, request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="jobs cannot be empty")
 
     created: list[dict[str, Any]] = []
-    system_user = get_system_user(request)
+    system_user = get_system_user_id(request)
     for item in payload.jobs:
         data = json.loads(item.model_dump_json())
-        data["user_id"] = str(data.get("user_id") or system_user)
+        data["user_id"] = system_user
         data["jobs_id"] = build_jobs_id(data.get("jobs_id", ""), data["user_id"])
         data["log_info"] = build_log_info(data.get("log_path", ""))
         try:
