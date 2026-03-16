@@ -8,7 +8,82 @@ const jobsDurationMinutes = document.getElementById('jobsDurationMinutes');
 const autoFinishEnabled = document.getElementById('autoFinishEnabled');
 let currentUser = 'user';
 let currentUserId = '0';
-const promptedFiveMinuteJobs = new Set();
+const promptedTimeoutConfirmJobs = new Set();
+let stopConfirmModal = null;
+
+function ensureStopConfirmModal() {
+  if (stopConfirmModal) return stopConfirmModal;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'stop-confirm-overlay';
+  overlay.innerHTML = `
+    <div class="stop-confirm-modal">
+      <div class="stop-confirm-title">Running Jobs Confirmation</div>
+      <div class="stop-confirm-message"></div>
+      <div class="stop-confirm-countdown"></div>
+      <div class="stop-confirm-actions">
+        <button type="button" class="finish-btn stop-confirm-ok">Confirm</button>
+        <button type="button" class="copy-btn stop-confirm-cancel">Cancel</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.style.display = 'none';
+
+  stopConfirmModal = {
+    overlay,
+    message: overlay.querySelector('.stop-confirm-message'),
+    countdown: overlay.querySelector('.stop-confirm-countdown'),
+    okBtn: overlay.querySelector('.stop-confirm-ok'),
+    cancelBtn: overlay.querySelector('.stop-confirm-cancel'),
+    timerId: null,
+    intervalId: null,
+  };
+  return stopConfirmModal;
+}
+
+function closeStopConfirmModal() {
+  const modal = ensureStopConfirmModal();
+  modal.overlay.style.display = 'none';
+  modal.overlay.dataset.jobId = '';
+  if (modal.timerId) {
+    window.clearTimeout(modal.timerId);
+    modal.timerId = null;
+  }
+  if (modal.intervalId) {
+    window.clearInterval(modal.intervalId);
+    modal.intervalId = null;
+  }
+}
+
+function showStopConfirmModal(jobId) {
+  const modal = ensureStopConfirmModal();
+  const deadline = Date.now() + 5 * 60 * 1000;
+  modal.overlay.dataset.jobId = String(jobId);
+  modal.message.textContent = 'Runing Jobs will finish in 5mins, PLS Confirm!!!';
+  const updateCountdown = () => {
+    const seconds = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+    const mm = String(Math.floor(seconds / 60)).padStart(2, '0');
+    const ss = String(seconds % 60).padStart(2, '0');
+    modal.countdown.textContent = `Auto cancel in ${mm}:${ss}`;
+  };
+  updateCountdown();
+  modal.overlay.style.display = 'flex';
+
+  modal.cancelBtn.onclick = () => closeStopConfirmModal();
+  modal.okBtn.onclick = async () => {
+    const response = await fetch(`/api/jobs/${jobId}/confirm-stop`, { method: 'POST' });
+    if (!response.ok) {
+      alert(`Confirm Fail: ${await response.text()}`);
+      return;
+    }
+    closeStopConfirmModal();
+    refreshRecentJobs();
+    refreshWaitingJobs();
+  };
+  modal.intervalId = window.setInterval(updateCountdown, 1000);
+  modal.timerId = window.setTimeout(() => closeStopConfirmModal(), 5 * 60 * 1000);
+}
 
 function makeJobsId() {
   const now = new Date();
@@ -468,34 +543,19 @@ function renderRecentJobs(jobs) {
         actions.appendChild(finishBtn);
       }
 
-      const needFiveMinuteConfirm = String(job.message || '').includes('less than 5 minutes left');
-      if (isOwner && !job.stop_confirmed && needFiveMinuteConfirm && !promptedFiveMinuteJobs.has(job.id)) {
-        promptedFiveMinuteJobs.add(job.id);
+      const needTimeoutConfirm = String(job.message || '').includes('Unconfirmed Stop in 5 minutes');
+      if (isOwner && !job.stop_confirmed && needTimeoutConfirm && !promptedTimeoutConfirmJobs.has(job.id)) {
+        promptedTimeoutConfirmJobs.add(job.id);
         window.setTimeout(async () => {
-          const ok = window.confirm('Runing Jobs will finish in 5mins, PLS Confirm!!!');
-          if (!ok) return;
-          const response = await fetch(`/api/jobs/${job.id}/confirm-stop`, { method: 'POST' });
-          if (!response.ok) {
-            alert(`Confirm Fail: ${await response.text()}`);
-            return;
-          }
-          refreshRecentJobs();
-          refreshWaitingJobs();
+          showStopConfirmModal(job.id);
         }, 0);
       }
     }
 
-    if (job.status === 'Runing' && String(job.message || '').includes('less than 5 minutes left')) {
+    if (job.status === 'Runing' && String(job.message || '').includes('Unconfirmed Stop in 5 minutes')) {
       const alert = document.createElement('div');
       alert.className = 'job-alert';
-      alert.textContent = 'Only 5 minutes left. Please confirm in popup whether jobs can end on time.';
-      item.appendChild(alert);
-    }
-
-    if (job.status === 'Runing' && String(job.message || '').includes('waiting confirmation grace period')) {
-      const alert = document.createElement('div');
-      alert.className = 'job-alert';
-      alert.textContent = 'Timeout reached. If not confirmed, system will auto-stop in 5 minutes and queue waits +5 minutes.';
+      alert.textContent = 'Unconfirmed Stop in 5 minutes';
       item.appendChild(alert);
     }
 
@@ -516,9 +576,17 @@ async function refreshRecentJobs() {
   const data = await response.json();
   const jobs = data.jobs || [];
   const runningIds = new Set(jobs.filter((job) => job.status === 'Runing').map((job) => job.id));
-  Array.from(promptedFiveMinuteJobs).forEach((jobId) => {
-    if (!runningIds.has(jobId)) promptedFiveMinuteJobs.delete(jobId);
+  Array.from(promptedTimeoutConfirmJobs).forEach((jobId) => {
+    if (!runningIds.has(jobId)) promptedTimeoutConfirmJobs.delete(jobId);
   });
+
+  const modal = ensureStopConfirmModal();
+  const currentModalJobId = modal.overlay.dataset.jobId;
+  if (modal.overlay.style.display !== 'none' && currentModalJobId) {
+    const targetJob = jobs.find((job) => String(job.id) === currentModalJobId);
+    const stillNeedsConfirm = Boolean(targetJob && targetJob.status === 'Runing' && !targetJob.stop_confirmed && String(targetJob.message || '').includes('Unconfirmed Stop in 5 minutes'));
+    if (!stillNeedsConfirm) closeStopConfirmModal();
+  }
   renderRecentJobs(jobs);
 }
 
