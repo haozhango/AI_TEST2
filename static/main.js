@@ -433,14 +433,16 @@ function renderRecentJobs(jobs) {
     actions.appendChild(copyBtn);
 
     if (job.status === 'Runing') {
-      const finishBtn = document.createElement('button');
-      finishBtn.textContent = 'Finish';
-      finishBtn.className = 'finish-btn';
-      finishBtn.type = 'button';
-      finishBtn.addEventListener('click', () => finishJob(job.id));
-      actions.appendChild(finishBtn);
-
       const isOwner = String(payload.user_id || '') === currentUserId;
+      if (isOwner) {
+        const finishBtn = document.createElement('button');
+        finishBtn.textContent = 'Finish';
+        finishBtn.className = 'finish-btn';
+        finishBtn.type = 'button';
+        finishBtn.addEventListener('click', () => finishJob(job.id));
+        actions.appendChild(finishBtn);
+      }
+
       const needFiveMinuteConfirm = String(job.message || '').includes('less than 5 minutes left');
       if (isOwner && !job.stop_confirmed && needFiveMinuteConfirm && !promptedFiveMinuteJobs.has(job.id)) {
         promptedFiveMinuteJobs.add(job.id);
