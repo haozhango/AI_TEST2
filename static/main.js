@@ -543,13 +543,21 @@ function renderRecentJobs(jobs) {
         actions.appendChild(finishBtn);
       }
 
-      const needTimeoutConfirm = String(job.message || '').includes('Unconfirmed Stop in 5 minutes');
-      if (isOwner && !job.stop_confirmed && needTimeoutConfirm && !promptedTimeoutConfirmJobs.has(job.id)) {
+      const messageText = String(job.message || '');
+      const needFiveMinuteConfirm = messageText.includes('less than 5 minutes left') || messageText.includes('Unconfirmed Stop in 5 minutes');
+      if (isOwner && !job.stop_confirmed && needFiveMinuteConfirm && !promptedTimeoutConfirmJobs.has(job.id)) {
         promptedTimeoutConfirmJobs.add(job.id);
         window.setTimeout(async () => {
           showStopConfirmModal(job.id);
         }, 0);
       }
+    }
+
+    if (job.status === 'Runing' && String(job.message || '').includes('less than 5 minutes left')) {
+      const alert = document.createElement('div');
+      alert.className = 'job-alert';
+      alert.textContent = 'Only 5 minutes left. Please confirm in popup whether jobs can end on time.';
+      item.appendChild(alert);
     }
 
     if (job.status === 'Runing' && String(job.message || '').includes('Unconfirmed Stop in 5 minutes')) {
@@ -584,7 +592,8 @@ async function refreshRecentJobs() {
   const currentModalJobId = modal.overlay.dataset.jobId;
   if (modal.overlay.style.display !== 'none' && currentModalJobId) {
     const targetJob = jobs.find((job) => String(job.id) === currentModalJobId);
-    const stillNeedsConfirm = Boolean(targetJob && targetJob.status === 'Runing' && !targetJob.stop_confirmed && String(targetJob.message || '').includes('Unconfirmed Stop in 5 minutes'));
+    const targetMessage = String((targetJob && targetJob.message) || '');
+    const stillNeedsConfirm = Boolean(targetJob && targetJob.status === 'Runing' && !targetJob.stop_confirmed && (targetMessage.includes('less than 5 minutes left') || targetMessage.includes('Unconfirmed Stop in 5 minutes')));
     if (!stillNeedsConfirm) closeStopConfirmModal();
   }
   renderRecentJobs(jobs);
