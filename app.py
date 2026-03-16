@@ -361,7 +361,7 @@ class JobManager:
                 if elapsed_seconds >= duration_minutes * 60 + grace_seconds:
                     self._finish_running_job_locked(job, "job auto finished 5 minutes after timeout without confirmation")
                 else:
-                    job.message = "timeout reached, waiting confirmation grace period"
+                    job.message = "Unconfirmed Stop in 5 minutes"
                 continue
 
             if payload.get("auto_finish", True):
