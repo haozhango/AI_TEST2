@@ -347,6 +347,15 @@ async function finishJob(jobId) {
 }
 
 
+async function stopAndResubmitJob(jobId) {
+  if (!window.confirm('Stop current submit and resubmit this job?')) return;
+  const response = await fetch(`/api/jobs/${jobId}/stop-and-resubmit`, { method: 'POST' });
+  if (!response.ok) return alert(`Stop and Resubmit failed: ${await response.text()}`);
+  refreshRecentJobs();
+  refreshWaitingJobs();
+}
+
+
 function formatWait(seconds) {
   const safe = Math.max(0, Number(seconds) || 0);
   const h = Math.floor(safe / 3600);
@@ -425,20 +434,36 @@ function renderRecentJobs(jobs) {
     `;
 
     const actions = item.querySelector('.actions');
+    actions.style.display = 'flex';
+    actions.style.flexDirection = 'column';
+    actions.style.alignItems = 'stretch';
+    actions.style.justifyContent = 'flex-start';
+    actions.style.gap = '8px';
+    actions.style.width = '180px';
     const copyBtn = document.createElement('button');
     copyBtn.textContent = 'Copy to New Jobs';
     copyBtn.className = 'copy-btn';
     copyBtn.type = 'button';
+    copyBtn.style.width = '100%';
     copyBtn.addEventListener('click', () => createNewJobCard(payload, null, { regenerateJobsId: true }));
     actions.appendChild(copyBtn);
 
     if (job.status === 'Runing') {
       const isOwner = String(payload.user_id || '') === currentUserId;
       if (isOwner) {
+        const stopAndResubmitBtn = document.createElement('button');
+        stopAndResubmitBtn.textContent = 'Stop and Resubmit';
+        stopAndResubmitBtn.className = 'copy-btn';
+        stopAndResubmitBtn.type = 'button';
+        stopAndResubmitBtn.style.width = '100%';
+        stopAndResubmitBtn.addEventListener('click', () => stopAndResubmitJob(job.id));
+        actions.appendChild(stopAndResubmitBtn);
+
         const finishBtn = document.createElement('button');
         finishBtn.textContent = 'Finish';
         finishBtn.className = 'finish-btn';
         finishBtn.type = 'button';
+        finishBtn.style.width = '100%';
         finishBtn.addEventListener('click', () => finishJob(job.id));
         actions.appendChild(finishBtn);
       }
