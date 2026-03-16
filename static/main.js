@@ -447,11 +447,11 @@ function renderRecentJobs(jobs) {
       if (isOwner && !job.stop_confirmed && needFiveMinuteConfirm && !promptedFiveMinuteJobs.has(job.id)) {
         promptedFiveMinuteJobs.add(job.id);
         window.setTimeout(async () => {
-          const ok = window.confirm('Runing 用户时间还剩 5 分钟，是否可以按时结束 jobs？');
+          const ok = window.confirm('Runing Jobs will finish in 5mins, PLS Confirm!!!');
           if (!ok) return;
           const response = await fetch(`/api/jobs/${job.id}/confirm-stop`, { method: 'POST' });
           if (!response.ok) {
-            alert(`确认失败: ${await response.text()}`);
+            alert(`Confirm Fail: ${await response.text()}`);
             return;
           }
           refreshRecentJobs();
