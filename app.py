@@ -194,8 +194,7 @@ class JobManager:
             self._promote_waiting_locked()
             return [self._waiting_to_api(self._waiting_jobs[job_id]) for job_id in self._waiting_order if job_id in self._waiting_jobs]
 
-    @staticmethod
-    def _build_job_command(payload: dict[str, Any]) -> str:
+    def _build_job_command(self, payload: dict[str, Any]) -> str:
         """
         Build a demo command that keeps running long enough for timeout logic to take effect.
 
@@ -211,7 +210,7 @@ class JobManager:
             sleep_seconds = 20
         else:
             # Add a small buffer so the process won't naturally exit before timeout handling.
-            sleep_seconds = duration_minutes * 60 + 30
+            sleep_seconds = duration_minutes * 60 + self.STOP_GRACE_MINUTES * 60 + 30
 
         return f"python3 -c \"import time; time.sleep({sleep_seconds}); print('job done')\""
 
@@ -361,7 +360,7 @@ class JobManager:
                 if elapsed_seconds >= duration_minutes * 60 + grace_seconds:
                     self._finish_running_job_locked(job, "job auto finished 5 minutes after timeout without confirmation")
                 else:
-                    job.message = "timeout reached, waiting confirmation grace period"
+                    job.message = "Unconfirmed Stop in 5 minutes"
                 continue
 
             if payload.get("auto_finish", True):
