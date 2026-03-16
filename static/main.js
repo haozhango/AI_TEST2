@@ -434,11 +434,17 @@ function renderRecentJobs(jobs) {
     `;
 
     const actions = item.querySelector('.actions');
-    actions.classList.add('recent-actions-force');
+    actions.style.display = 'flex';
+    actions.style.flexDirection = 'column';
+    actions.style.alignItems = 'stretch';
+    actions.style.justifyContent = 'flex-start';
+    actions.style.gap = '8px';
+    actions.style.width = '180px';
     const copyBtn = document.createElement('button');
     copyBtn.textContent = 'Copy to New Jobs';
     copyBtn.className = 'copy-btn';
     copyBtn.type = 'button';
+    copyBtn.style.width = '100%';
     copyBtn.addEventListener('click', () => createNewJobCard(payload, null, { regenerateJobsId: true }));
     actions.appendChild(copyBtn);
 
@@ -449,6 +455,7 @@ function renderRecentJobs(jobs) {
         stopAndResubmitBtn.textContent = 'Stop and Resubmit';
         stopAndResubmitBtn.className = 'copy-btn';
         stopAndResubmitBtn.type = 'button';
+        stopAndResubmitBtn.style.width = '100%';
         stopAndResubmitBtn.addEventListener('click', () => stopAndResubmitJob(job.id));
         actions.appendChild(stopAndResubmitBtn);
 
@@ -456,6 +463,7 @@ function renderRecentJobs(jobs) {
         finishBtn.textContent = 'Finish';
         finishBtn.className = 'finish-btn';
         finishBtn.type = 'button';
+        finishBtn.style.width = '100%';
         finishBtn.addEventListener('click', () => finishJob(job.id));
         actions.appendChild(finishBtn);
       }
