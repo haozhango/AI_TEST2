@@ -56,6 +56,8 @@ class JobRecord:
     submit_time: str
     end_time: str | None = None
     message: str = ""
+    stop_confirmed: bool = False
+    stop_confirm_time: str | None = None
     process: subprocess.Popen[str] | None = field(default=None, repr=False)
 
 
@@ -68,6 +70,8 @@ class WaitingJobRecord:
 
 class JobManager:
     MAX_RECENT_JOBS = 10
+    STOP_CONFIRM_REMINDER_MINUTES = 5
+    STOP_GRACE_MINUTES = 5
 
     def __init__(self) -> None:
         self._jobs: dict[str, JobRecord] = {}
@@ -255,6 +259,21 @@ class JobManager:
             self._promote_waiting_locked()
             return job
 
+    def confirm_stop(self, job_id: str, user_id: str) -> JobRecord:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if not job:
+                raise KeyError(job_id)
+            owner = str((job.payload or {}).get("user_id") or "")
+            if owner != user_id:
+                raise PermissionError("can only confirm own running job")
+            if job.status != "Runing":
+                return job
+            job.stop_confirmed = True
+            job.stop_confirm_time = datetime.now().isoformat(timespec="seconds")
+            job.message = "stop timing confirmed"
+            return job
+
     def _finish_running_job_locked(self, job: JobRecord, message: str) -> None:
         process = job.process
         if process and process.poll() is None:
@@ -283,8 +302,22 @@ class JobManager:
             except ValueError:
                 continue
             elapsed_seconds = (now - submit_at).total_seconds()
+            remaining_seconds = duration_minutes * 60 - elapsed_seconds
+            if remaining_seconds <= self.STOP_CONFIRM_REMINDER_MINUTES * 60 and not job.stop_confirmed:
+                if elapsed_seconds < duration_minutes * 60:
+                    job.message = "less than 5 minutes left, waiting for stop confirmation"
+
             if elapsed_seconds < duration_minutes * 60:
                 continue
+
+            if not job.stop_confirmed:
+                grace_seconds = self.STOP_GRACE_MINUTES * 60
+                if elapsed_seconds >= duration_minutes * 60 + grace_seconds:
+                    self._finish_running_job_locked(job, "job auto finished 5 minutes after timeout without confirmation")
+                else:
+                    job.message = "timeout reached, waiting confirmation grace period"
+                continue
+
             if payload.get("auto_finish", True):
                 self._finish_running_job_locked(job, "job auto finished on timeout")
             else:
@@ -325,6 +358,8 @@ class JobManager:
                 running_submit = now
             running_duration = self._duration_minutes(running.payload)
             running_end = running_submit + timedelta(minutes=running_duration) if running_duration > 0 else running_submit
+            if running_duration > 0 and not running.stop_confirmed and now >= running_end:
+                running_end = running_end + timedelta(minutes=self.STOP_GRACE_MINUTES)
             start_time = max(now, running_end)
 
         for qid in self._waiting_order:
@@ -368,6 +403,8 @@ class JobManager:
             "submit_time": job.submit_time,
             "end_time": job.end_time,
             "message": job.message,
+            "stop_confirmed": job.stop_confirmed,
+            "stop_confirm_time": job.stop_confirm_time,
             "payload": job.payload,
         }
 
@@ -633,6 +670,18 @@ def stop_job(job_id: str) -> dict[str, Any]:
         job = manager.stop(job_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="job not found") from exc
+    return manager._to_api(job)
+
+
+@app.post("/api/jobs/{job_id}/confirm-stop")
+def confirm_stop(job_id: str, request: Request) -> dict[str, Any]:
+    user_id = get_system_user_id(request)
+    try:
+        job = manager.confirm_stop(job_id, user_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="job not found") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     return manager._to_api(job)
 
 

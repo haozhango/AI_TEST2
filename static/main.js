@@ -438,6 +438,37 @@ function renderRecentJobs(jobs) {
       finishBtn.type = 'button';
       finishBtn.addEventListener('click', () => finishJob(job.id));
       actions.appendChild(finishBtn);
+
+      if (String(payload.user_id || '') === currentUserId && !job.stop_confirmed && Number(payload.duration_minutes || 0) > 0) {
+        const confirmBtn = document.createElement('button');
+        confirmBtn.textContent = 'Confirm Stop On Time';
+        confirmBtn.className = 'copy-btn';
+        confirmBtn.type = 'button';
+        confirmBtn.addEventListener('click', async () => {
+          const response = await fetch(`/api/jobs/${job.id}/confirm-stop`, { method: 'POST' });
+          if (!response.ok) {
+            alert(`Confirm failed: ${await response.text()}`);
+            return;
+          }
+          refreshRecentJobs();
+          refreshWaitingJobs();
+        });
+        actions.appendChild(confirmBtn);
+      }
+    }
+
+    if (job.status === 'Runing' && String(job.message || '').includes('less than 5 minutes left')) {
+      const alert = document.createElement('div');
+      alert.className = 'job-alert';
+      alert.textContent = 'Only 5 minutes left. Please confirm whether you can stop on time.';
+      item.appendChild(alert);
+    }
+
+    if (job.status === 'Runing' && String(job.message || '').includes('waiting confirmation grace period')) {
+      const alert = document.createElement('div');
+      alert.className = 'job-alert';
+      alert.textContent = 'Timeout reached. If not confirmed, system will auto-stop in 5 minutes and queue waits +5 minutes.';
+      item.appendChild(alert);
     }
 
     if (job.status === 'Runing' && String(job.message || '').includes('pending finish')) {
