@@ -599,7 +599,7 @@ function renderRecentJobs(jobs) {
       }
     }
 
-    if (job.status === 'Runing' && String(job.message || '').includes('less than 5 minutes left')) {
+    if (job.status === 'Runing' && String(job.message || '').includes('Unconfirmed Stop in 5 minutes')) {
       const alert = document.createElement('div');
       alert.className = 'job-alert';
       alert.textContent = 'Only 5 minutes left. Please confirm in popup whether jobs can end on time.';
