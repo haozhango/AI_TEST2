@@ -11,6 +11,35 @@ let currentUserId = '0';
 const promptedTimeoutConfirmJobs = new Set();
 let stopConfirmModal = null;
 
+function findRecentJobCard(jobId) {
+  return recentJobs.querySelector(`.recent-card[data-job-id="${CSS.escape(String(jobId))}"]`);
+}
+
+function positionStopConfirmModal(jobId) {
+  const modal = ensureStopConfirmModal();
+  const card = findRecentJobCard(jobId);
+  if (!card) return;
+
+  card.scrollIntoView({ block: 'center', behavior: 'smooth' });
+
+  const place = () => {
+    const rect = card.getBoundingClientRect();
+    const modalRect = modal.modalBox.getBoundingClientRect();
+    const gap = 10;
+
+    let top = Math.max(12, Math.min(rect.top, window.innerHeight - modalRect.height - 12));
+    let left = rect.right + gap;
+    if (left + modalRect.width > window.innerWidth - 12) left = rect.left - modalRect.width - gap;
+    if (left < 12) left = Math.max(12, Math.min(rect.left, window.innerWidth - modalRect.width - 12));
+
+    modal.modalBox.style.top = `${top}px`;
+    modal.modalBox.style.left = `${left}px`;
+  };
+
+  place();
+  window.requestAnimationFrame(place);
+}
+
 function ensureStopConfirmModal() {
   if (stopConfirmModal) return stopConfirmModal;
 
@@ -32,12 +61,14 @@ function ensureStopConfirmModal() {
 
   stopConfirmModal = {
     overlay,
+    modalBox: overlay.querySelector('.stop-confirm-modal'),
     message: overlay.querySelector('.stop-confirm-message'),
     countdown: overlay.querySelector('.stop-confirm-countdown'),
     okBtn: overlay.querySelector('.stop-confirm-ok'),
     cancelBtn: overlay.querySelector('.stop-confirm-cancel'),
     timerId: null,
     intervalId: null,
+    handleViewportChange: null,
   };
   return stopConfirmModal;
 }
@@ -54,6 +85,11 @@ function closeStopConfirmModal() {
     window.clearInterval(modal.intervalId);
     modal.intervalId = null;
   }
+  if (modal.handleViewportChange) {
+    window.removeEventListener('resize', modal.handleViewportChange);
+    window.removeEventListener('scroll', modal.handleViewportChange, true);
+    modal.handleViewportChange = null;
+  }
 }
 
 function showStopConfirmModal(jobId) {
@@ -68,7 +104,16 @@ function showStopConfirmModal(jobId) {
     modal.countdown.textContent = `Auto cancel in ${mm}:${ss}`;
   };
   updateCountdown();
-  modal.overlay.style.display = 'flex';
+  modal.overlay.style.display = 'block';
+  positionStopConfirmModal(jobId);
+
+  if (modal.handleViewportChange) {
+    window.removeEventListener('resize', modal.handleViewportChange);
+    window.removeEventListener('scroll', modal.handleViewportChange, true);
+  }
+  modal.handleViewportChange = () => positionStopConfirmModal(jobId);
+  window.addEventListener('resize', modal.handleViewportChange);
+  window.addEventListener('scroll', modal.handleViewportChange, true);
 
   modal.cancelBtn.onclick = () => closeStopConfirmModal();
   modal.okBtn.onclick = async () => {
@@ -498,6 +543,7 @@ function renderRecentJobs(jobs) {
     const payload = job.payload || {};
     const item = document.createElement('div');
     item.className = 'recent-card row-grid';
+    item.dataset.jobId = String(job.id);
     item.innerHTML = `
       <div class="kv jobid-kv"><span class="key">JobsID</span><span class="val jobid-val">${payload.jobs_id || '-'}</span></div>
       <div class="kv status-kv"><span class="key">Status</span><span class="val status ${job.status}">${job.status}</span></div>
