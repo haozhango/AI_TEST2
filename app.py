@@ -293,6 +293,11 @@ class JobManager:
             if job.status != "Runing":
                 raise ValueError("job is not running")
             process = job.process
+            # Immediately invalidate old watcher callbacks to guarantee resubmit priority
+            # over waiting queue promotion while old process exits.
+            job.run_token += 1
+            job.process = None
+            job.message = "job resubmitting"
 
         if process and process.poll() is None:
             process.terminate()
