@@ -544,7 +544,7 @@ function renderRecentJobs(jobs) {
       }
 
       const messageText = String(job.message || '');
-      const needFiveMinuteConfirm = messageText.includes('less than 5 minutes left') || messageText.includes('Unconfirmed Stop in 5 minutes');
+      const needFiveMinuteConfirm = messageText.includes('less than 5 minutes left');
       if (isOwner && !job.stop_confirmed && needFiveMinuteConfirm && !promptedTimeoutConfirmJobs.has(job.id)) {
         promptedTimeoutConfirmJobs.add(job.id);
         window.setTimeout(async () => {
@@ -593,7 +593,7 @@ async function refreshRecentJobs() {
   if (modal.overlay.style.display !== 'none' && currentModalJobId) {
     const targetJob = jobs.find((job) => String(job.id) === currentModalJobId);
     const targetMessage = String((targetJob && targetJob.message) || '');
-    const stillNeedsConfirm = Boolean(targetJob && targetJob.status === 'Runing' && !targetJob.stop_confirmed && (targetMessage.includes('less than 5 minutes left') || targetMessage.includes('Unconfirmed Stop in 5 minutes')));
+    const stillNeedsConfirm = Boolean(targetJob && targetJob.status === 'Runing' && !targetJob.stop_confirmed && targetMessage.includes('less than 5 minutes left'));
     if (!stillNeedsConfirm) closeStopConfirmModal();
   }
   renderRecentJobs(jobs);
