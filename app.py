@@ -346,27 +346,31 @@ class JobManager:
                 submit_at = datetime.fromisoformat(job.submit_time)
             except ValueError:
                 continue
+
+            auto_finish = bool(payload.get("auto_finish", True))
             elapsed_seconds = (now - submit_at).total_seconds()
-            remaining_seconds = duration_minutes * 60 - elapsed_seconds
-            if remaining_seconds <= self.STOP_CONFIRM_REMINDER_MINUTES * 60 and not job.stop_confirmed:
-                if elapsed_seconds < duration_minutes * 60:
+            timeout_seconds = duration_minutes * 60
+            remaining_seconds = timeout_seconds - elapsed_seconds
+
+            if auto_finish:
+                if elapsed_seconds >= timeout_seconds:
+                    self._finish_running_job_locked(job, "job auto finished on timeout")
+                continue
+
+            if elapsed_seconds < timeout_seconds:
+                if remaining_seconds <= self.STOP_CONFIRM_REMINDER_MINUTES * 60 and not job.stop_confirmed:
                     job.message = "less than 5 minutes left, waiting for stop confirmation"
-
-            if elapsed_seconds < duration_minutes * 60:
                 continue
 
-            if not job.stop_confirmed:
-                grace_seconds = self.STOP_GRACE_MINUTES * 60
-                if elapsed_seconds >= duration_minutes * 60 + grace_seconds:
-                    self._finish_running_job_locked(job, "job auto finished 5 minutes after timeout without confirmation")
-                else:
-                    job.message = "Unconfirmed Stop in 5 minutes"
+            if job.stop_confirmed:
+                self._finish_running_job_locked(job, "job finished on timeout after owner confirmation")
                 continue
 
-            if payload.get("auto_finish", True):
-                self._finish_running_job_locked(job, "job auto finished on timeout")
+            grace_seconds = self.STOP_GRACE_MINUTES * 60
+            if elapsed_seconds >= timeout_seconds + grace_seconds:
+                self._finish_running_job_locked(job, "job auto finished 5 minutes after timeout without confirmation")
             else:
-                job.message = "timeout reached, pending finish"
+                job.message = "Unconfirmed Stop in 5 minutes"
 
     def list_jobs(self) -> list[dict[str, Any]]:
         with self._lock:
@@ -403,7 +407,8 @@ class JobManager:
                 running_submit = now
             running_duration = self._duration_minutes(running.payload)
             running_end = running_submit + timedelta(minutes=running_duration) if running_duration > 0 else running_submit
-            if running_duration > 0 and not running.stop_confirmed and now >= running_end:
+            running_auto_finish = bool((running.payload or {}).get("auto_finish", True))
+            if running_duration > 0 and (not running_auto_finish) and (not running.stop_confirmed) and now >= running_end:
                 running_end = running_end + timedelta(minutes=self.STOP_GRACE_MINUTES)
             start_time = max(now, running_end)
 
