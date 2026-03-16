@@ -12,13 +12,25 @@ const promptedTimeoutConfirmJobs = new Set();
 let stopConfirmModal = null;
 
 function findRecentJobCard(jobId) {
-  return recentJobs.querySelector(`.recent-card[data-job-id="${CSS.escape(String(jobId))}"]`);
+  const targetId = String(jobId);
+  const cards = recentJobs.querySelectorAll('.recent-card[data-job-id]');
+  for (const card of cards) {
+    if (card.dataset.jobId === targetId) return card;
+  }
+  return null;
 }
 
 function positionStopConfirmModal(jobId) {
   const modal = ensureStopConfirmModal();
   const card = findRecentJobCard(jobId);
-  if (!card) return;
+  if (!card) {
+    const modalRect = modal.modalBox.getBoundingClientRect();
+    const top = Math.max(12, (window.innerHeight - modalRect.height) / 2);
+    const left = Math.max(12, (window.innerWidth - modalRect.width) / 2);
+    modal.modalBox.style.top = `${top}px`;
+    modal.modalBox.style.left = `${left}px`;
+    return;
+  }
 
   card.scrollIntoView({ block: 'center', behavior: 'smooth' });
 
@@ -37,7 +49,10 @@ function positionStopConfirmModal(jobId) {
   };
 
   place();
-  window.requestAnimationFrame(place);
+  window.requestAnimationFrame(() => {
+    place();
+    window.setTimeout(place, 80);
+  });
 }
 
 function ensureStopConfirmModal() {
