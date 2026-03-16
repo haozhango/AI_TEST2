@@ -45,7 +45,19 @@ h1, h2 { margin: 0 0 12px; }
   grid-template-columns: repeat(6, minmax(165px, 1fr)) auto;
 }
 .waiting-card.row-grid {
-  grid-template-columns: repeat(4, minmax(165px, 1fr)) auto;
+  grid-template-columns: repeat(4, minmax(165px, 1fr));
+}
+
+.waiting-card {
+  position: relative;
+}
+.waiting-delete-btn {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  margin: 0;
+  font-size: 22px;
+  line-height: 1;
 }
 
 .field, .kv { display: flex; flex-direction: column; gap: 6px; }

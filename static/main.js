@@ -536,17 +536,16 @@ function renderWaitingJobs(jobs) {
       <div class="kv"><span class="key">HAPS Platform</span><span class="val">${payload.haps_platform || '-'}</span></div>
       <div class="kv"><span class="key">Wait Time</span><span class="val">${formatWait(job.wait_seconds)}</span></div>
       <div class="kv"><span class="key">Running User</span><span class="val">${job.running_user_id || '-'}</span></div>
-      <div class="actions waiting-actions"></div>
     `;
 
-    const actions = item.querySelector('.waiting-actions');
     if ((payload.user_id || '') === currentUserId) {
       const delBtn = document.createElement('button');
       delBtn.type = 'button';
-      delBtn.className = 'delete-btn';
+      delBtn.className = 'delete-btn waiting-delete-btn';
       delBtn.textContent = '×';
+      delBtn.title = 'Delete waiting job';
       delBtn.addEventListener('click', () => cancelWaitingJob(job.id));
-      actions.appendChild(delBtn);
+      item.appendChild(delBtn);
     }
 
     if (job.overdue) {
