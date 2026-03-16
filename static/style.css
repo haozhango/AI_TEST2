@@ -114,6 +114,18 @@ button { padding: 9px 12px; border: none; border-radius: 7px; cursor: pointer; b
 .recent-card .actions > button {
   width: 100%;
 }
+
+.recent-actions-force {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  justify-content: flex-start !important;
+  gap: 8px !important;
+  width: 180px !important;
+}
+.recent-actions-force > button {
+  width: 100% !important;
+}
 .status.Runing { color: #0a66ff; font-weight: 700; }
 .status.Finish { color: #15803d; font-weight: 700; }
 .status.Stopped, .status.Failed { color: #a11; font-weight: 700; }
