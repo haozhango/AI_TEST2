@@ -434,6 +434,7 @@ function renderRecentJobs(jobs) {
     `;
 
     const actions = item.querySelector('.actions');
+    actions.classList.add('recent-actions');
     const copyBtn = document.createElement('button');
     copyBtn.textContent = 'Copy to New Jobs';
     copyBtn.className = 'copy-btn';
