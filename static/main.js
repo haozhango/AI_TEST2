@@ -8,6 +8,7 @@ const jobsDurationMinutes = document.getElementById('jobsDurationMinutes');
 const autoFinishEnabled = document.getElementById('autoFinishEnabled');
 let currentUser = 'user';
 let currentUserId = '0';
+const promptedFiveMinuteJobs = new Set();
 
 function makeJobsId() {
   const now = new Date();
@@ -432,12 +433,45 @@ function renderRecentJobs(jobs) {
     actions.appendChild(copyBtn);
 
     if (job.status === 'Runing') {
-      const finishBtn = document.createElement('button');
-      finishBtn.textContent = 'Finish';
-      finishBtn.className = 'finish-btn';
-      finishBtn.type = 'button';
-      finishBtn.addEventListener('click', () => finishJob(job.id));
-      actions.appendChild(finishBtn);
+      const isOwner = String(payload.user_id || '') === currentUserId;
+      if (isOwner) {
+        const finishBtn = document.createElement('button');
+        finishBtn.textContent = 'Finish';
+        finishBtn.className = 'finish-btn';
+        finishBtn.type = 'button';
+        finishBtn.addEventListener('click', () => finishJob(job.id));
+        actions.appendChild(finishBtn);
+      }
+
+      const needFiveMinuteConfirm = String(job.message || '').includes('less than 5 minutes left');
+      if (isOwner && !job.stop_confirmed && needFiveMinuteConfirm && !promptedFiveMinuteJobs.has(job.id)) {
+        promptedFiveMinuteJobs.add(job.id);
+        window.setTimeout(async () => {
+          const ok = window.confirm('Runing Jobs will finish in 5mins, PLS Confirm!!!');
+          if (!ok) return;
+          const response = await fetch(`/api/jobs/${job.id}/confirm-stop`, { method: 'POST' });
+          if (!response.ok) {
+            alert(`Confirm Fail: ${await response.text()}`);
+            return;
+          }
+          refreshRecentJobs();
+          refreshWaitingJobs();
+        }, 0);
+      }
+    }
+
+    if (job.status === 'Runing' && String(job.message || '').includes('less than 5 minutes left')) {
+      const alert = document.createElement('div');
+      alert.className = 'job-alert';
+      alert.textContent = 'Only 5 minutes left. Please confirm in popup whether jobs can end on time.';
+      item.appendChild(alert);
+    }
+
+    if (job.status === 'Runing' && String(job.message || '').includes('waiting confirmation grace period')) {
+      const alert = document.createElement('div');
+      alert.className = 'job-alert';
+      alert.textContent = 'Timeout reached. If not confirmed, system will auto-stop in 5 minutes and queue waits +5 minutes.';
+      item.appendChild(alert);
     }
 
     if (job.status === 'Runing' && String(job.message || '').includes('pending finish')) {
@@ -455,7 +489,12 @@ async function refreshRecentJobs() {
   const response = await fetch('/api/jobs');
   if (!response.ok) return;
   const data = await response.json();
-  renderRecentJobs(data.jobs || []);
+  const jobs = data.jobs || [];
+  const runningIds = new Set(jobs.filter((job) => job.status === 'Runing').map((job) => job.id));
+  Array.from(promptedFiveMinuteJobs).forEach((jobId) => {
+    if (!runningIds.has(jobId)) promptedFiveMinuteJobs.delete(jobId);
+  });
+  renderRecentJobs(jobs);
 }
 
 async function bootstrap() {
