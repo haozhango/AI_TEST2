@@ -58,6 +58,7 @@ class JobRecord:
     message: str = ""
     stop_confirmed: bool = False
     stop_confirm_time: str | None = None
+    run_token: int = 0
     process: subprocess.Popen[str] | None = field(default=None, repr=False)
 
 
@@ -89,10 +90,17 @@ class JobManager:
             submit_time=now,
             message="job started",
         )
+        self._launch_job_process_locked(job)
 
-        command = self._build_job_command(payload)
+        self._jobs[job.id] = job
+        self._order.insert(0, job.id)
+        self._prune_jobs_locked()
 
-        log_path = payload.get("log_path", "").strip()
+        return job
+
+    def _launch_job_process_locked(self, job: JobRecord) -> None:
+        command = self._build_job_command(job.payload)
+        log_path = (job.payload or {}).get("log_path", "").strip()
         if log_path:
             path = Path(log_path)
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -100,6 +108,7 @@ class JobManager:
         else:
             log_file = subprocess.DEVNULL
 
+        job.run_token += 1
         process = subprocess.Popen(
             ["bash", "-lc", command],
             stdout=log_file,
@@ -107,13 +116,7 @@ class JobManager:
             text=True,
         )
         job.process = process
-
-        self._jobs[job.id] = job
-        self._order.insert(0, job.id)
-        self._prune_jobs_locked()
-
-        threading.Thread(target=self._watch_job, args=(job.id,), daemon=True).start()
-        return job
+        threading.Thread(target=self._watch_job, args=(job.id, job.run_token), daemon=True).start()
 
 
     @staticmethod
@@ -212,17 +215,22 @@ class JobManager:
 
         return f"python3 -c \"import time; time.sleep({sleep_seconds}); print('job done')\""
 
-    def _watch_job(self, job_id: str) -> None:
+    def _watch_job(self, job_id: str, run_token: int) -> None:
         with self._lock:
             job = self._jobs.get(job_id)
-        if not job or not job.process:
+            if not job or job.run_token != run_token:
+                return
+            process = job.process
+        if not process:
             return
 
-        rc = job.process.wait()
+        rc = process.wait()
         with self._lock:
             current = self._jobs.get(job_id)
+            if not current or current.run_token != run_token:
+                return
             # If timeout/manual handlers already finalized this job, preserve that status.
-            if not current or current.status != "Runing":
+            if current.status != "Runing":
                 return
             current.end_time = datetime.now().isoformat(timespec="seconds")
             if rc == 0:
@@ -273,6 +281,39 @@ class JobManager:
             job.stop_confirm_time = datetime.now().isoformat(timespec="seconds")
             job.message = "stop timing confirmed"
             return job
+
+    def stop_and_resubmit(self, job_id: str, user_id: str) -> JobRecord:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if not job:
+                raise KeyError(job_id)
+            owner = str((job.payload or {}).get("user_id") or "")
+            if owner != user_id:
+                raise PermissionError("can only resubmit own running job")
+            if job.status != "Runing":
+                raise ValueError("job is not running")
+            process = job.process
+
+        if process and process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
+
+        with self._lock:
+            current = self._jobs.get(job_id)
+            if not current:
+                raise KeyError(job_id)
+            if current.status != "Runing":
+                raise ValueError("job is not running")
+            current.end_time = None
+            current.message = "job stopped and resubmitted with original timer"
+            current.stop_confirmed = False
+            current.stop_confirm_time = None
+            self._launch_job_process_locked(current)
+            return current
 
     def _finish_running_job_locked(self, job: JobRecord, message: str) -> None:
         process = job.process
@@ -682,6 +723,20 @@ def confirm_stop(job_id: str, request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="job not found") from exc
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return manager._to_api(job)
+
+
+@app.post("/api/jobs/{job_id}/stop-and-resubmit")
+def stop_and_resubmit(job_id: str, request: Request) -> dict[str, Any]:
+    user_id = get_system_user_id(request)
+    try:
+        job = manager.stop_and_resubmit(job_id, user_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="job not found") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return manager._to_api(job)
 
 

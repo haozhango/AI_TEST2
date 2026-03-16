@@ -347,6 +347,15 @@ async function finishJob(jobId) {
 }
 
 
+async function stopAndResubmitJob(jobId) {
+  if (!window.confirm('Stop current submit and resubmit this job?')) return;
+  const response = await fetch(`/api/jobs/${jobId}/stop-and-resubmit`, { method: 'POST' });
+  if (!response.ok) return alert(`Stop and Resubmit failed: ${await response.text()}`);
+  refreshRecentJobs();
+  refreshWaitingJobs();
+}
+
+
 function formatWait(seconds) {
   const safe = Math.max(0, Number(seconds) || 0);
   const h = Math.floor(safe / 3600);
@@ -435,6 +444,13 @@ function renderRecentJobs(jobs) {
     if (job.status === 'Runing') {
       const isOwner = String(payload.user_id || '') === currentUserId;
       if (isOwner) {
+        const stopAndResubmitBtn = document.createElement('button');
+        stopAndResubmitBtn.textContent = 'Stop and Resubmit';
+        stopAndResubmitBtn.className = 'copy-btn';
+        stopAndResubmitBtn.type = 'button';
+        stopAndResubmitBtn.addEventListener('click', () => stopAndResubmitJob(job.id));
+        actions.appendChild(stopAndResubmitBtn);
+
         const finishBtn = document.createElement('button');
         finishBtn.textContent = 'Finish';
         finishBtn.className = 'finish-btn';
