@@ -8,6 +8,7 @@ const jobsDurationMinutes = document.getElementById('jobsDurationMinutes');
 const autoFinishEnabled = document.getElementById('autoFinishEnabled');
 let currentUser = 'user';
 let currentUserId = '0';
+const promptedFiveMinuteJobs = new Set();
 
 function makeJobsId() {
   const now = new Date();
@@ -439,28 +440,28 @@ function renderRecentJobs(jobs) {
       finishBtn.addEventListener('click', () => finishJob(job.id));
       actions.appendChild(finishBtn);
 
-      if (String(payload.user_id || '') === currentUserId && !job.stop_confirmed && Number(payload.duration_minutes || 0) > 0) {
-        const confirmBtn = document.createElement('button');
-        confirmBtn.textContent = 'Confirm Stop On Time';
-        confirmBtn.className = 'copy-btn';
-        confirmBtn.type = 'button';
-        confirmBtn.addEventListener('click', async () => {
+      const isOwner = String(payload.user_id || '') === currentUserId;
+      const needFiveMinuteConfirm = String(job.message || '').includes('less than 5 minutes left');
+      if (isOwner && !job.stop_confirmed && needFiveMinuteConfirm && !promptedFiveMinuteJobs.has(job.id)) {
+        promptedFiveMinuteJobs.add(job.id);
+        window.setTimeout(async () => {
+          const ok = window.confirm('Runing 用户时间还剩 5 分钟，是否可以按时结束 jobs？');
+          if (!ok) return;
           const response = await fetch(`/api/jobs/${job.id}/confirm-stop`, { method: 'POST' });
           if (!response.ok) {
-            alert(`Confirm failed: ${await response.text()}`);
+            alert(`确认失败: ${await response.text()}`);
             return;
           }
           refreshRecentJobs();
           refreshWaitingJobs();
-        });
-        actions.appendChild(confirmBtn);
+        }, 0);
       }
     }
 
     if (job.status === 'Runing' && String(job.message || '').includes('less than 5 minutes left')) {
       const alert = document.createElement('div');
       alert.className = 'job-alert';
-      alert.textContent = 'Only 5 minutes left. Please confirm whether you can stop on time.';
+      alert.textContent = 'Only 5 minutes left. Please confirm in popup whether jobs can end on time.';
       item.appendChild(alert);
     }
 
@@ -486,7 +487,12 @@ async function refreshRecentJobs() {
   const response = await fetch('/api/jobs');
   if (!response.ok) return;
   const data = await response.json();
-  renderRecentJobs(data.jobs || []);
+  const jobs = data.jobs || [];
+  const runningIds = new Set(jobs.filter((job) => job.status === 'Runing').map((job) => job.id));
+  Array.from(promptedFiveMinuteJobs).forEach((jobId) => {
+    if (!runningIds.has(jobId)) promptedFiveMinuteJobs.delete(jobId);
+  });
+  renderRecentJobs(jobs);
 }
 
 async function bootstrap() {
