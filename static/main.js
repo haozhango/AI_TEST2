@@ -8,7 +8,7 @@ const jobsDurationMinutes = document.getElementById('jobsDurationMinutes');
 const autoFinishEnabled = document.getElementById('autoFinishEnabled');
 let currentUser = 'user';
 let currentUserId = '0';
-const promptedFiveMinuteJobs = new Set();
+const promptedTimeoutConfirmJobs = new Set();
 let stopConfirmModal = null;
 
 function ensureStopConfirmModal() {
@@ -543,20 +543,13 @@ function renderRecentJobs(jobs) {
         actions.appendChild(finishBtn);
       }
 
-      const needFiveMinuteConfirm = String(job.message || '').includes('less than 5 minutes left');
-      if (isOwner && !job.stop_confirmed && needFiveMinuteConfirm && !promptedFiveMinuteJobs.has(job.id)) {
-        promptedFiveMinuteJobs.add(job.id);
+      const needTimeoutConfirm = String(job.message || '').includes('Unconfirmed Stop in 5 minutes');
+      if (isOwner && !job.stop_confirmed && needTimeoutConfirm && !promptedTimeoutConfirmJobs.has(job.id)) {
+        promptedTimeoutConfirmJobs.add(job.id);
         window.setTimeout(async () => {
           showStopConfirmModal(job.id);
         }, 0);
       }
-    }
-
-    if (job.status === 'Runing' && String(job.message || '').includes('less than 5 minutes left')) {
-      const alert = document.createElement('div');
-      alert.className = 'job-alert';
-      alert.textContent = 'Only 5 minutes left. Please confirm in popup whether jobs can end on time.';
-      item.appendChild(alert);
     }
 
     if (job.status === 'Runing' && String(job.message || '').includes('Unconfirmed Stop in 5 minutes')) {
@@ -583,9 +576,17 @@ async function refreshRecentJobs() {
   const data = await response.json();
   const jobs = data.jobs || [];
   const runningIds = new Set(jobs.filter((job) => job.status === 'Runing').map((job) => job.id));
-  Array.from(promptedFiveMinuteJobs).forEach((jobId) => {
-    if (!runningIds.has(jobId)) promptedFiveMinuteJobs.delete(jobId);
+  Array.from(promptedTimeoutConfirmJobs).forEach((jobId) => {
+    if (!runningIds.has(jobId)) promptedTimeoutConfirmJobs.delete(jobId);
   });
+
+  const modal = ensureStopConfirmModal();
+  const currentModalJobId = modal.overlay.dataset.jobId;
+  if (modal.overlay.style.display !== 'none' && currentModalJobId) {
+    const targetJob = jobs.find((job) => String(job.id) === currentModalJobId);
+    const stillNeedsConfirm = Boolean(targetJob && targetJob.status === 'Runing' && !targetJob.stop_confirmed && String(targetJob.message || '').includes('Unconfirmed Stop in 5 minutes'));
+    if (!stillNeedsConfirm) closeStopConfirmModal();
+  }
   renderRecentJobs(jobs);
 }
 
