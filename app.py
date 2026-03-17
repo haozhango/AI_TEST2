@@ -8,6 +8,7 @@ import socket
 import subprocess
 import threading
 import uuid
+import time
 
 try:
     import fcntl
@@ -93,6 +94,7 @@ class UartStreamManager:
             lambda: defaultdict(lambda: deque(maxlen=self.MAX_LINES_PER_DEVICE))
         )
         self._threads: dict[tuple[str, str], tuple[threading.Event, threading.Thread]] = {}
+        self._last_line_seen: dict[tuple[str, str], tuple[str, float]] = {}
         self._lock = threading.Lock()
 
     def attach_loop(self, loop: asyncio.AbstractEventLoop) -> None:
@@ -190,6 +192,16 @@ class UartStreamManager:
                     line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
                     if not line:
                         continue
+
+                    dedup_key = (job_id, device)
+                    now_mono = time.monotonic()
+                    with self._lock:
+                        prev = self._last_line_seen.get(dedup_key)
+                        self._last_line_seen[dedup_key] = (line, now_mono)
+                    # Filter accidental immediate duplicate sampling caused by some UART adapters/drivers.
+                    if prev and prev[0] == line and (now_mono - prev[1]) < 0.12:
+                        continue
+
                     self._append_and_broadcast({
                         "type": "line",
                         "job_id": job_id,
@@ -208,6 +220,7 @@ class UartStreamManager:
         finally:
             with self._lock:
                 self._threads.pop((job_id, device), None)
+                self._last_line_seen.pop((job_id, device), None)
             self._append_and_broadcast({
                 "type": "status",
                 "job_id": job_id,

@@ -97,6 +97,11 @@ function renderUartPanel(panel, jobId, uartPaths) {
     grid.appendChild(column);
   });
   panel.appendChild(grid);
+  window.requestAnimationFrame(() => {
+    panel.querySelectorAll('.uart-column-output').forEach((node) => {
+      node.scrollTop = node.scrollHeight;
+    });
+  });
 }
 function findRecentJobCard(jobId) {
   const targetId = String(jobId);
