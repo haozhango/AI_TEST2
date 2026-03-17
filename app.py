@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import asyncio
 import os
 import pwd
 import socket
@@ -8,16 +9,22 @@ import subprocess
 import threading
 import uuid
 from dataclasses import dataclass, field
+from collections import defaultdict, deque
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 APP_ROOT = Path(__file__).resolve().parent
+
+try:
+    import serial  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover
+    serial = None
 
 
 class OpenOcdCfgInput(BaseModel):
@@ -69,17 +76,140 @@ class WaitingJobRecord:
     submit_time: str
 
 
+class UartStreamManager:
+    MAX_LINES_PER_DEVICE = 400
+
+    def __init__(self) -> None:
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._connections: set[WebSocket] = set()
+        self._buffers: dict[str, deque[dict[str, str]]] = defaultdict(lambda: deque(maxlen=self.MAX_LINES_PER_DEVICE))
+        self._threads: dict[tuple[str, str], tuple[threading.Event, threading.Thread]] = {}
+        self._lock = threading.Lock()
+
+    def attach_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        self._loop = loop
+
+    def snapshot(self) -> dict[str, list[dict[str, str]]]:
+        with self._lock:
+            return {device: list(lines) for device, lines in self._buffers.items()}
+
+    def register(self, websocket: WebSocket) -> None:
+        with self._lock:
+            self._connections.add(websocket)
+
+    def unregister(self, websocket: WebSocket) -> None:
+        with self._lock:
+            self._connections.discard(websocket)
+
+    def start_capture(self, job_id: str, uart_paths: list[str]) -> None:
+        unique_paths = sorted({path.strip() for path in uart_paths if path and path.strip()})
+        if not unique_paths:
+            return
+
+        for device in unique_paths:
+            key = (job_id, device)
+            with self._lock:
+                if key in self._threads:
+                    continue
+                stop_event = threading.Event()
+                worker = threading.Thread(target=self._read_serial_worker, args=(job_id, device, stop_event), daemon=True)
+                self._threads[key] = (stop_event, worker)
+            worker.start()
+
+    def stop_capture(self, job_id: str) -> None:
+        with self._lock:
+            targets = [key for key in self._threads if key[0] == job_id]
+            stops = [self._threads.pop(key)[0] for key in targets]
+        for stop_event in stops:
+            stop_event.set()
+
+    def _append_and_broadcast(self, message: dict[str, str]) -> None:
+        device = message.get("device", "unknown")
+        with self._lock:
+            self._buffers[device].append(message)
+        self._broadcast(message)
+
+    def _read_serial_worker(self, job_id: str, device: str, stop_event: threading.Event) -> None:
+        if serial is None:
+            self._append_and_broadcast({
+                "type": "status",
+                "device": device,
+                "line": "pyserial is not installed on server",
+                "ts": datetime.now().isoformat(timespec="seconds"),
+            })
+            return
+
+        self._append_and_broadcast({
+            "type": "status",
+            "device": device,
+            "line": f"[{job_id}] opening {device}",
+            "ts": datetime.now().isoformat(timespec="seconds"),
+        })
+        try:
+            with serial.Serial(device, baudrate=115200, timeout=0.5) as uart:
+                while not stop_event.is_set():
+                    raw = uart.readline()
+                    if not raw:
+                        continue
+                    line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
+                    if not line:
+                        continue
+                    self._append_and_broadcast({
+                        "type": "line",
+                        "device": device,
+                        "line": line,
+                        "ts": datetime.now().isoformat(timespec="seconds"),
+                    })
+        except Exception as exc:
+            self._append_and_broadcast({
+                "type": "status",
+                "device": device,
+                "line": f"[{job_id}] serial read failed: {exc}",
+                "ts": datetime.now().isoformat(timespec="seconds"),
+            })
+        finally:
+            with self._lock:
+                self._threads.pop((job_id, device), None)
+            self._append_and_broadcast({
+                "type": "status",
+                "device": device,
+                "line": f"[{job_id}] closed {device}",
+                "ts": datetime.now().isoformat(timespec="seconds"),
+            })
+
+    def _broadcast(self, message: dict[str, str]) -> None:
+        loop = self._loop
+        if loop is None:
+            return
+        asyncio.run_coroutine_threadsafe(self._broadcast_async(message), loop)
+
+    async def _broadcast_async(self, message: dict[str, str]) -> None:
+        with self._lock:
+            connections = list(self._connections)
+        disconnected: list[WebSocket] = []
+        for websocket in connections:
+            try:
+                await websocket.send_json(message)
+            except Exception:
+                disconnected.append(websocket)
+        if disconnected:
+            with self._lock:
+                for websocket in disconnected:
+                    self._connections.discard(websocket)
+
+
 class JobManager:
     MAX_RECENT_JOBS = 10
     STOP_CONFIRM_REMINDER_MINUTES = 5
     STOP_GRACE_MINUTES = 5
 
-    def __init__(self) -> None:
+    def __init__(self, uart_stream: UartStreamManager) -> None:
         self._jobs: dict[str, JobRecord] = {}
         self._order: list[str] = []
         self._waiting_jobs: dict[str, WaitingJobRecord] = {}
         self._waiting_order: list[str] = []
         self._lock = threading.Lock()
+        self._uart_stream = uart_stream
 
     def _start_job(self, payload: dict[str, Any]) -> JobRecord:
         now = datetime.now().isoformat(timespec="seconds")
@@ -116,6 +246,8 @@ class JobManager:
             text=True,
         )
         job.process = process
+        uart_paths = list((job.payload or {}).get("uart_paths") or [])
+        self._uart_stream.start_capture(job.id, uart_paths)
         threading.Thread(target=self._watch_job, args=(job.id, job.run_token), daemon=True).start()
 
 
@@ -228,6 +360,7 @@ class JobManager:
             current = self._jobs.get(job_id)
             if not current or current.run_token != run_token:
                 return
+            self._uart_stream.stop_capture(job_id)
             # If timeout/manual handlers already finalized this job, preserve that status.
             if current.status != "Runing":
                 return
@@ -260,6 +393,7 @@ class JobManager:
 
         with self._lock:
             job = self._jobs[job_id]
+            self._uart_stream.stop_capture(job_id)
             job.status = "Finish"
             job.end_time = datetime.now().isoformat(timespec="seconds")
             job.message = "job manually finished"
@@ -292,6 +426,7 @@ class JobManager:
             if job.status != "Runing":
                 raise ValueError("job is not running")
             process = job.process
+            self._uart_stream.stop_capture(job_id)
             # Immediately invalidate old watcher callbacks to guarantee resubmit priority
             # over waiting queue promotion while old process exits.
             job.run_token += 1
@@ -328,6 +463,7 @@ class JobManager:
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait(timeout=5)
+        self._uart_stream.stop_capture(job.id)
         job.status = "Finish"
         job.end_time = datetime.now().isoformat(timespec="seconds")
         job.message = message
@@ -611,12 +747,35 @@ def _get_local_socket_uid(local_host: str, local_port: int | None, remote_host: 
 
 app = FastAPI(title="HAPS Jobs Console Platform")
 app.mount("/static", StaticFiles(directory=APP_ROOT / "static"), name="static")
-manager = JobManager()
+uart_stream_manager = UartStreamManager()
+manager = JobManager(uart_stream_manager)
+
+
+@app.on_event("startup")
+async def _on_startup() -> None:
+    uart_stream_manager.attach_loop(asyncio.get_running_loop())
 
 
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(APP_ROOT / "static" / "index.html")
+
+
+@app.get("/uart-console")
+def uart_console_page() -> FileResponse:
+    return FileResponse(APP_ROOT / "static" / "uart_console.html")
+
+
+@app.websocket("/ws/uart")
+async def ws_uart(websocket: WebSocket) -> None:
+    await websocket.accept()
+    uart_stream_manager.register(websocket)
+    await websocket.send_json({"type": "snapshot", "devices": uart_stream_manager.snapshot()})
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        uart_stream_manager.unregister(websocket)
 
 
 

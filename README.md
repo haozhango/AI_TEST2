@@ -21,6 +21,7 @@
 11. Stop 后后端终止对应进程。
 12. Recent Jobs 记录提交时间与结束时间。
 13. Recent Jobs 支持 Copy 到 New Jobs。
+14. 新增 UART Console 页面（Open UART Console），当提交 jobs 包含串口 `uart_paths` 时，后端通过 pyserial 捕获串口输出，并通过 websocket 实时按设备（dev）展示。
 
 ## Python 版本要求
 
@@ -61,7 +62,7 @@ sudo apt install -y python3 python3-venv python3-pip
 python3 -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
-pip install fastapi uvicorn
+pip install fastapi uvicorn pyserial
 ```
 
 ### 4) 启动服务
@@ -100,7 +101,7 @@ curl http://127.0.0.1:8000/api/jobs
 
 ```bash
 source .venv/bin/activate
-pip install fastapi uvicorn
+pip install fastapi uvicorn pyserial
 ```
 
 ### Q3: 局域网其它机器访问不到
@@ -118,3 +119,5 @@ pip install fastapi uvicorn
 - `POST /api/jobs`：提交 jobs
 - `GET /api/jobs`：查询 recent jobs
 - `POST /api/jobs/{job_id}/stop`：停止运行中的 job
+- `GET /uart-console`：UART 实时输出页面
+- `WS /ws/uart`：UART 实时流（按设备输出）

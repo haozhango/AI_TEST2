@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>UART Console</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <main class="container uart-console-container">
+    <div class="header-row">
+      <h1>UART Console</h1>
+      <a class="nav-link-btn" href="/">Back to Jobs</a>
+    </div>
+
+    <section class="panel panel-recent">
+      <div class="uart-console-toolbar">
+        <label>
+          Device
+          <select id="deviceSelect"></select>
+        </label>
+        <button id="clearBtn" type="button" class="copy-btn">Clear Current View</button>
+      </div>
+      <pre id="uartOutput" class="uart-output">Waiting for UART stream...</pre>
+    </section>
+  </main>
+
+  <script src="/static/uart_console.js"></script>
+</body>
+</html>
