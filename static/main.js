@@ -10,7 +10,126 @@ let currentUser = 'user';
 let currentUserId = '0';
 const promptedTimeoutConfirmJobs = new Set();
 let stopConfirmModal = null;
+const expandedUartJobs = new Set();
+const uartBuffers = new Map();
+const uartLastLineSeen = new Map();
+let uartSocket = null;
+let uartPingTimer = null;
+function ensureUartJobDevice(jobId, device) {
+  const jobKey = String(jobId || '');
+  const devKey = String(device || 'unknown');
+  if (!uartBuffers.has(jobKey)) uartBuffers.set(jobKey, new Map());
+  const devices = uartBuffers.get(jobKey);
+  if (!devices.has(devKey)) devices.set(devKey, []);
+  return devices.get(devKey);
+}
+function appendUartLine(jobId, device, line, ts) {
+  const jobKey = String(jobId || '');
+  const devKey = String(device || 'unknown');
+  const dedupKey = `${jobKey}::${devKey}`;
+  const now = Date.now();
+  const prev = uartLastLineSeen.get(dedupKey);
+  if (prev && prev.line === line && (now - prev.at) < 700) return;
+  uartLastLineSeen.set(dedupKey, { line, at: now });
 
+  const list = ensureUartJobDevice(jobKey, devKey);
+  list.push(`[${ts}] ${line}`);
+  if (list.length > 500) list.shift();
+}
+function consumeUartSnapshot(jobs) {
+  Object.entries(jobs || {}).forEach(([jobId, byDevice]) => {
+    if (!uartBuffers.has(jobId)) uartBuffers.set(jobId, new Map());
+    const devices = uartBuffers.get(jobId);
+    Object.entries(byDevice || {}).forEach(([device, lines]) => {
+      const normalized = (lines || []).map((item) => `[${item.ts || ''}] ${item.line || ''}`);
+      devices.set(device, normalized.slice(-500));
+    });
+  });
+}
+function connectUartSocket() {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  uartSocket = new WebSocket(`${protocol}//${window.location.host}/ws/uart`);
+  uartSocket.onopen = () => {
+    if (uartPingTimer) window.clearInterval(uartPingTimer);
+    uartPingTimer = window.setInterval(() => {
+      if (uartSocket && uartSocket.readyState === WebSocket.OPEN) uartSocket.send('ping');
+    }, 15000);
+  };
+  uartSocket.onmessage = (event) => {
+    try {
+      const msg = JSON.parse(event.data);
+      if (msg.type === 'snapshot') {
+        consumeUartSnapshot(msg.jobs || {});
+        refreshRecentJobs();
+        return;
+      }
+      if (msg.type !== 'line' && msg.type !== 'status') return;
+      appendUartLine(msg.job_id || '', msg.device || 'unknown', msg.line || '', msg.ts || '');
+      const jobCard = findRecentJobCard(msg.job_id || '');
+      if (!jobCard || !expandedUartJobs.has(String(msg.job_id || ''))) return;
+      const panel = jobCard.querySelector('.uart-job-console');
+      if (!panel) return;
+      if (!patchUartPanelLine(panel, String(msg.job_id || ''), msg.device || 'unknown')) {
+        renderUartPanel(panel, String(msg.job_id || ''), []);
+      }
+    } catch (_) {}
+  };
+  uartSocket.onclose = () => {
+    if (uartPingTimer) {
+      window.clearInterval(uartPingTimer);
+      uartPingTimer = null;
+    }
+    window.setTimeout(connectUartSocket, 1500);
+  };
+}
+function renderUartPanel(panel, jobId, uartPaths) {
+  const devicesMap = uartBuffers.get(String(jobId)) || new Map();
+  const sourceDevices = [...new Set([...(uartPaths || []), ...Array.from(devicesMap.keys())].map((v) => String(v || '').trim()).filter(Boolean))];
+  panel.innerHTML = '';
+  if (!sourceDevices.length) {
+    panel.textContent = 'No UART device found in this job.';
+    return;
+  }
+  const grid = document.createElement('div');
+  grid.className = 'uart-columns';
+  grid.style.gridTemplateColumns = `repeat(${Math.min(2, sourceDevices.length)}, minmax(300px, 1fr))`;
+  sourceDevices.forEach((device, index) => {
+    const column = document.createElement('div');
+    column.className = 'uart-column';
+    column.dataset.device = device;
+    const isOddLast = sourceDevices.length > 1 && (sourceDevices.length % 2 === 1) && index === sourceDevices.length - 1;
+    if (isOddLast) column.style.gridColumn = '1 / -1';
+    const title = document.createElement('div');
+    title.className = 'uart-column-title';
+    title.textContent = device;
+    const pre = document.createElement('pre');
+    pre.className = 'uart-column-output';
+    pre.dataset.device = device;
+    const lines = devicesMap.get(device) || [];
+    pre.textContent = lines.length ? lines.join('\n') : `Waiting output from ${device} ...`;
+    pre.scrollTop = pre.scrollHeight;
+    column.appendChild(title);
+    column.appendChild(pre);
+    grid.appendChild(column);
+  });
+  panel.appendChild(grid);
+  window.requestAnimationFrame(() => {
+    panel.querySelectorAll('.uart-column-output').forEach((node) => {
+      node.scrollTop = node.scrollHeight;
+    });
+  });
+}
+
+function patchUartPanelLine(panel, jobId, device) {
+  const targetDevice = String(device || 'unknown');
+  const pre = panel.querySelector(`.uart-column-output[data-device="${CSS.escape(targetDevice)}"]`);
+  if (!pre) return false;
+  const devicesMap = uartBuffers.get(String(jobId)) || new Map();
+  const lines = devicesMap.get(targetDevice) || [];
+  pre.textContent = lines.length ? lines.join('\n') : `Waiting output from ${targetDevice} ...`;
+  pre.scrollTop = pre.scrollHeight;
+  return true;
+}
 function findRecentJobCard(jobId) {
   const targetId = String(jobId);
   const cards = recentJobs.querySelectorAll('.recent-card[data-job-id]');
@@ -19,7 +138,6 @@ function findRecentJobCard(jobId) {
   }
   return null;
 }
-
 function positionStopConfirmModal(jobId) {
   const modal = ensureStopConfirmModal();
   const card = findRecentJobCard(jobId);
@@ -31,33 +149,26 @@ function positionStopConfirmModal(jobId) {
     modal.modalBox.style.left = `${left}px`;
     return;
   }
-
   card.scrollIntoView({ block: 'center', behavior: 'smooth' });
-
   const place = () => {
     const rect = card.getBoundingClientRect();
     const modalRect = modal.modalBox.getBoundingClientRect();
     const gap = 10;
-
     let top = Math.max(12, Math.min(rect.top, window.innerHeight - modalRect.height - 12));
     let left = rect.right + gap;
     if (left + modalRect.width > window.innerWidth - 12) left = rect.left - modalRect.width - gap;
     if (left < 12) left = Math.max(12, Math.min(rect.left, window.innerWidth - modalRect.width - 12));
-
     modal.modalBox.style.top = `${top}px`;
     modal.modalBox.style.left = `${left}px`;
   };
-
   place();
   window.requestAnimationFrame(() => {
     place();
     window.setTimeout(place, 80);
   });
 }
-
 function ensureStopConfirmModal() {
   if (stopConfirmModal) return stopConfirmModal;
-
   const overlay = document.createElement('div');
   overlay.className = 'stop-confirm-overlay';
   overlay.innerHTML = `
@@ -73,7 +184,6 @@ function ensureStopConfirmModal() {
   `;
   document.body.appendChild(overlay);
   overlay.style.display = 'none';
-
   stopConfirmModal = {
     overlay,
     modalBox: overlay.querySelector('.stop-confirm-modal'),
@@ -87,7 +197,6 @@ function ensureStopConfirmModal() {
   };
   return stopConfirmModal;
 }
-
 function closeStopConfirmModal() {
   const modal = ensureStopConfirmModal();
   modal.overlay.style.display = 'none';
@@ -106,23 +215,19 @@ function closeStopConfirmModal() {
     modal.handleViewportChange = null;
   }
 }
-
 function resolveStopDeadline(job) {
   if (!job) return Date.now() + 5 * 60 * 1000;
-
   const payload = job.payload || {};
   const durationMinutes = Number(payload.duration_minutes || 0);
   const submitAt = Date.parse(job.submit_time || '');
   if (!Number.isFinite(durationMinutes) || durationMinutes <= 0 || Number.isNaN(submitAt)) {
     return Date.now() + 5 * 60 * 1000;
   }
-
   const timeoutAt = submitAt + durationMinutes * 60 * 1000;
   const messageText = String(job.message || '');
   if (messageText.includes('Unconfirmed Stop in 5 minutes')) return timeoutAt + 5 * 60 * 1000;
   return timeoutAt;
 }
-
 function showStopConfirmModal(job) {
   const modal = ensureStopConfirmModal();
   const jobId = job && job.id;
@@ -138,7 +243,6 @@ function showStopConfirmModal(job) {
   updateCountdown();
   modal.overlay.style.display = 'block';
   positionStopConfirmModal(jobId);
-
   if (modal.handleViewportChange) {
     window.removeEventListener('resize', modal.handleViewportChange);
     window.removeEventListener('scroll', modal.handleViewportChange, true);
@@ -146,7 +250,6 @@ function showStopConfirmModal(job) {
   modal.handleViewportChange = () => positionStopConfirmModal(jobId);
   window.addEventListener('resize', modal.handleViewportChange);
   window.addEventListener('scroll', modal.handleViewportChange, true);
-
   modal.cancelBtn.onclick = () => closeStopConfirmModal();
   modal.okBtn.onclick = async () => {
     const response = await fetch(`/api/jobs/${jobId}/confirm-stop`, { method: 'POST' });
@@ -161,14 +264,12 @@ function showStopConfirmModal(job) {
   modal.intervalId = window.setInterval(updateCountdown, 1000);
   modal.timerId = window.setTimeout(() => closeStopConfirmModal(), 5 * 60 * 1000);
 }
-
 function makeJobsId() {
   const now = new Date();
   const pad = (v) => String(v).padStart(2, '0');
   const ts = `${pad(now.getFullYear() % 100)}${pad(now.getMonth() + 1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
   return `${currentUserId}_${ts}`;
 }
-
 function addUartItem(card, value = '') {
   const uartList = card.querySelector('.uart-list');
   const item = uartTemplate.content.firstElementChild.cloneNode(true);
@@ -177,12 +278,9 @@ function addUartItem(card, value = '') {
   item.querySelector('.remove-uart-btn').addEventListener('click', () => item.remove());
   uartList.appendChild(item);
 }
-
 let fileBrowserModal = null;
-
 function ensureFileBrowserModal() {
   if (fileBrowserModal) return fileBrowserModal;
-
   const overlay = document.createElement('div');
   overlay.className = 'file-browser-overlay';
   overlay.innerHTML = `
@@ -204,19 +302,16 @@ function ensureFileBrowserModal() {
   `;
   document.body.appendChild(overlay);
   overlay.style.display = 'none';
-
   const close = () => {
     overlay.style.display = 'none';
     overlay.dataset.mode = '';
     overlay.dataset.targetInput = '';
   };
-
   overlay.querySelector('.file-browser-close').addEventListener('click', close);
   overlay.querySelector('.file-browser-cancel').addEventListener('click', close);
   overlay.addEventListener('click', (event) => {
     if (event.target === overlay) close();
   });
-
   fileBrowserModal = {
     overlay,
     pathInput: overlay.querySelector('.file-browser-path'),
@@ -227,18 +322,15 @@ function ensureFileBrowserModal() {
   };
   return fileBrowserModal;
 }
-
 function findParentPath(pathValue) {
   const normalized = (pathValue || '').trim();
   if (!normalized) return '';
   if (normalized === '/') return '/';
-
   const clean = normalized.endsWith('/') && normalized.length > 1 ? normalized.slice(0, -1) : normalized;
   const slashIndex = clean.lastIndexOf('/');
   if (slashIndex <= 0) return '/';
   return clean.slice(0, slashIndex);
 }
-
 async function loadFsEntriesWithFallback(path, mode) {
   const trimmed = (path || '').trim();
   try {
@@ -250,7 +342,6 @@ async function loadFsEntriesWithFallback(path, mode) {
     return loadFsEntries(fallbackPath, mode);
   }
 }
-
 async function loadFsEntries(path, mode) {
   const url = `/api/fs?path=${encodeURIComponent(path || '')}&mode=${encodeURIComponent(mode)}`;
   const response = await fetch(url);
@@ -260,19 +351,16 @@ async function loadFsEntries(path, mode) {
   }
   return response.json();
 }
-
 async function browseViaFileSystem(target, mode = 'file') {
   const modal = ensureFileBrowserModal();
   modal.overlay.style.display = 'flex';
   modal.overlay.dataset.mode = mode;
   modal.overlay.currentTarget = target;
-
   const render = async (path) => {
     modal.list.textContent = 'Loading...';
     const data = await loadFsEntriesWithFallback(path || target.value || '', mode);
     modal.pathInput.value = data.cwd;
     modal.list.innerHTML = '';
-
     const addEntryButton = (name, pathValue, type, className = 'fs-item') => {
       const item = document.createElement('button');
       item.type = 'button';
@@ -292,14 +380,11 @@ async function browseViaFileSystem(target, mode = 'file') {
       });
       modal.list.appendChild(item);
     };
-
     if (data.parent) addEntryButton('..', data.parent, 'directory', 'fs-item fs-nav');
-
     data.entries.forEach((entry) => {
       const prefix = entry.type === 'directory' ? '\u{1F5C2}' : '\u{1F4C4}';
       addEntryButton(`${prefix} ${entry.name}`, entry.path, entry.type);
     });
-
     if (!data.entries.length && !data.parent) {
       const empty = document.createElement('div');
       empty.className = 'fs-empty';
@@ -307,7 +392,6 @@ async function browseViaFileSystem(target, mode = 'file') {
       modal.list.appendChild(empty);
     }
   };
-
   modal.goBtn.onclick = async () => {
     await render(modal.pathInput.value);
   };
@@ -322,7 +406,6 @@ async function browseViaFileSystem(target, mode = 'file') {
     target.value = nextValue;
     modal.close();
   };
-
   try {
     await render(target.value);
   } catch (error) {
@@ -333,17 +416,14 @@ async function browseViaFileSystem(target, mode = 'file') {
     modal.list.appendChild(errorNode);
   }
 }
-
 function bindFileSystemBrowse(card, btnSelector, inputSelector, mode = 'file') {
   const btn = card.querySelector(btnSelector);
   const target = card.querySelector(inputSelector);
   if (!btn || !target) return;
-
   btn.addEventListener('click', async () => {
     await browseViaFileSystem(target, mode);
   });
 }
-
 function updateDbConfigState(card, key, enabled) {
   const input = card.querySelector(`input[name="${key}"]`);
   if (!input) return;
@@ -356,7 +436,6 @@ function updateDbConfigState(card, key, enabled) {
   const browseBtn = card.querySelector(browseMap[key]);
   if (browseBtn) browseBtn.disabled = !enabled;
 }
-
 function bindDbConfigToggles(card, prefill = {}) {
   card.querySelectorAll('.db-config-toggle').forEach((toggle) => {
     const key = toggle.dataset.target;
@@ -366,17 +445,13 @@ function bindDbConfigToggles(card, prefill = {}) {
     }
     const initialValue = prefill[key];
     if (typeof prefill[enabledFlagKey] !== 'boolean' && initialValue === 'auto') toggle.checked = false;
-
     updateDbConfigState(card, key, toggle.checked);
     toggle.addEventListener('change', () => updateDbConfigState(card, key, toggle.checked));
   });
 }
-
 function normalizeUartPaths(prefill = {}) {
   const normalizeList = (values) => values.map((value) => String(value || '').trim()).filter(Boolean);
-
   if (Array.isArray(prefill.uart_paths)) return normalizeList(prefill.uart_paths);
-
   if (typeof prefill.uart_paths === 'string') {
     const text = prefill.uart_paths.trim();
     if (!text) return [];
@@ -386,22 +461,17 @@ function normalizeUartPaths(prefill = {}) {
     } catch (_) {}
     return text.split(/[\n,;]/).map((item) => item.trim()).filter(Boolean);
   }
-
   if (typeof prefill.uart_path === 'string' && prefill.uart_path.trim()) return [prefill.uart_path.trim()];
   if (typeof prefill.uart === 'string' && prefill.uart.trim()) return [prefill.uart.trim()];
-
   const legacyUartValues = ['uart1', 'uart2', 'uart3', 'uart4', 'uart_1', 'uart_2', 'uart_3', 'uart_4']
     .map((key) => prefill[key])
     .filter((value) => typeof value === 'string' && value.trim());
   if (legacyUartValues.length) return normalizeList(legacyUartValues);
-
   return [];
 }
-
 function createNewJobCard(prefill = {}, insertAfterNode = null, options = {}) {
   const node = template.content.firstElementChild.cloneNode(true);
   const normalizedUartPaths = normalizeUartPaths(prefill);
-
   node.querySelector('input[name="jobs_id"]').value = options.regenerateJobsId ? makeJobsId() : (prefill.jobs_id || makeJobsId());
   node.querySelector('select[name="haps_platform"]').value = prefill.haps_platform || 'BJ-HAPS80';
   node.querySelector('input[name="database_path"]').value = prefill.database_path && prefill.database_path !== 'auto' ? prefill.database_path : '';
@@ -410,41 +480,34 @@ function createNewJobCard(prefill = {}, insertAfterNode = null, options = {}) {
   node.querySelector('input[name="binfile"]').value = prefill.binfile || '';
   node.querySelector('input[name="img_file"]').value = prefill.img_file || '';
   node.querySelector('input[name="log_path"]').value = prefill.log_path || '';
-
   const openocdCfg = prefill.openocd_cfg || {};
   node.querySelector('input[name="openocd_tool_path"]').value = openocdCfg.tool_path || '';
   node.querySelector('input[name="openocd_cfg_file"]').value = openocdCfg.cfg_file || '';
-
   (normalizedUartPaths.length ? normalizedUartPaths : ['']).forEach((val) => addUartItem(node, val));
-
   node.querySelector('.add-uart-btn').addEventListener('click', () => addUartItem(node));
   node.querySelector('.delete-btn').addEventListener('click', () => {
     node.remove();
     if (!newJobsList.children.length) createNewJobCard();
   });
   node.querySelector('.add-btn').addEventListener('click', () => createNewJobCard({}, node));
-
   bindFileSystemBrowse(node, '.browse-btn', '.binfile-path', 'file');
   bindFileSystemBrowse(node, '.img-file-browse-btn', '.img-file-path', 'file');
   bindFileSystemBrowse(node, '.database-browse-btn', '.database-path', 'file');
   bindFileSystemBrowse(node, '.reset-browse-btn', '.reset-script-path', 'file');
   bindFileSystemBrowse(node, '.imgload-browse-btn', '.imgload-script-path', 'file');
   bindDbConfigToggles(node, prefill);
-
   if (insertAfterNode && insertAfterNode.parentNode === newJobsList) {
     insertAfterNode.insertAdjacentElement('afterend', node);
   } else {
     newJobsList.appendChild(node);
   }
 }
-
 function initJobsTimingSettings() {
   const options = [6];
   for (let value = 10; value <= 240; value += 10) options.push(value);
   jobsDurationMinutes.innerHTML = options.map((value) => `<option value="${value}">${value} min</option>`).join('');
   jobsDurationMinutes.value = '10';
 }
-
 function collectNewJobs() {
   return Array.from(newJobsList.querySelectorAll('.job-card')).map((card) => {
     const uartPaths = Array.from(card.querySelectorAll('.uart-input')).map((i) => i.value.trim()).filter(Boolean);
@@ -474,7 +537,6 @@ function collectNewJobs() {
     };
   });
 }
-
 async function submitJobs(event) {
   event.preventDefault();
   const response = await fetch('/api/jobs', {
@@ -486,10 +548,10 @@ async function submitJobs(event) {
   newJobsList.innerHTML = '';
   initJobsTimingSettings();
   createNewJobCard();
+  connectUartSocket();
   refreshRecentJobs();
   refreshWaitingJobs();
 }
-
 async function finishJob(jobId) {
   if (!window.confirm('Finish this running job?')) return;
   const response = await fetch(`/api/jobs/${jobId}/stop`, { method: 'POST' });
@@ -497,8 +559,6 @@ async function finishJob(jobId) {
   refreshRecentJobs();
   refreshWaitingJobs();
 }
-
-
 async function stopAndResubmitJob(jobId) {
   if (!window.confirm('Stop current submit and resubmit this job?')) return;
   const response = await fetch(`/api/jobs/${jobId}/stop-and-resubmit`, { method: 'POST' });
@@ -506,8 +566,6 @@ async function stopAndResubmitJob(jobId) {
   refreshRecentJobs();
   refreshWaitingJobs();
 }
-
-
 function formatWait(seconds) {
   const safe = Math.max(0, Number(seconds) || 0);
   const h = Math.floor(safe / 3600);
@@ -516,17 +574,14 @@ function formatWait(seconds) {
   if (h > 0) return `${h}h ${m}m ${s}s`;
   return `${m}m ${s}s`;
 }
-
 async function cancelWaitingJob(waitingId) {
   const response = await fetch(`/api/waiting-jobs/${waitingId}?user_id=${encodeURIComponent(currentUserId)}`, { method: 'DELETE' });
   if (!response.ok) return alert(`Cancel failed: ${await response.text()}`);
   refreshWaitingJobs();
 }
-
 function renderWaitingJobs(jobs) {
   waitingJobs.innerHTML = '';
   if (!jobs.length) return (waitingJobs.textContent = 'No waiting jobs');
-
   jobs.forEach((job) => {
     const payload = job.payload || {};
     const item = document.createElement('div');
@@ -537,7 +592,6 @@ function renderWaitingJobs(jobs) {
       <div class="kv"><span class="key">Wait Time</span><span class="val">${formatWait(job.wait_seconds)}</span></div>
       <div class="kv"><span class="key">Running User</span><span class="val">${job.running_user_id || '-'}</span></div>
     `;
-
     if ((payload.user_id || '') === currentUserId) {
       const delBtn = document.createElement('button');
       delBtn.type = 'button';
@@ -547,29 +601,24 @@ function renderWaitingJobs(jobs) {
       delBtn.addEventListener('click', () => cancelWaitingJob(job.id));
       item.appendChild(delBtn);
     }
-
     if (job.overdue) {
       const note = document.createElement('div');
       note.className = 'job-alert';
       note.textContent = `Queue time reached. Running job is not finished, you can contact user: ${job.running_user_id || '-'}.`;
       item.appendChild(note);
     }
-
     waitingJobs.appendChild(item);
   });
 }
-
 async function refreshWaitingJobs() {
   const response = await fetch('/api/waiting-jobs');
   if (!response.ok) return;
   const data = await response.json();
   renderWaitingJobs(data.jobs || []);
 }
-
 function renderRecentJobs(jobs) {
   recentJobs.innerHTML = '';
   if (!jobs.length) return (recentJobs.textContent = 'No jobs yet');
-
   jobs.forEach((job) => {
     const payload = job.payload || {};
     const item = document.createElement('div');
@@ -584,7 +633,6 @@ function renderRecentJobs(jobs) {
       <div class="kv"><span class="key">Log Info</span><span class="val">${payload.log_info || '-'}</span></div>
       <div class="actions"></div>
     `;
-
     const actions = item.querySelector('.actions');
     actions.style.display = 'flex';
     actions.style.flexDirection = 'column';
@@ -599,9 +647,24 @@ function renderRecentJobs(jobs) {
     copyBtn.style.width = '100%';
     copyBtn.addEventListener('click', () => createNewJobCard(payload, null, { regenerateJobsId: true }));
     actions.appendChild(copyBtn);
-
+    const jobUartPaths = Array.isArray(payload.uart_paths) ? payload.uart_paths : [];
+    const isOwner = String(payload.user_id || '') === currentUserId;
+    if (jobUartPaths.length && isOwner) {
+      const uartBtn = document.createElement('button');
+      const expanded = expandedUartJobs.has(String(job.id));
+      uartBtn.textContent = expanded ? 'Hide UART Console' : 'Open UART Console';
+      uartBtn.className = 'copy-btn';
+      uartBtn.type = 'button';
+      uartBtn.style.width = '100%';
+      uartBtn.addEventListener('click', () => {
+        const key = String(job.id);
+        if (expandedUartJobs.has(key)) expandedUartJobs.delete(key);
+        else expandedUartJobs.add(key);
+        refreshRecentJobs();
+      });
+      actions.appendChild(uartBtn);
+    }
     if (job.status === 'Runing') {
-      const isOwner = String(payload.user_id || '') === currentUserId;
       if (isOwner) {
         const stopAndResubmitBtn = document.createElement('button');
         stopAndResubmitBtn.textContent = 'Stop and Resubmit';
@@ -610,7 +673,6 @@ function renderRecentJobs(jobs) {
         stopAndResubmitBtn.style.width = '100%';
         stopAndResubmitBtn.addEventListener('click', () => stopAndResubmitJob(job.id));
         actions.appendChild(stopAndResubmitBtn);
-
         const finishBtn = document.createElement('button');
         finishBtn.textContent = 'Finish';
         finishBtn.className = 'finish-btn';
@@ -619,7 +681,6 @@ function renderRecentJobs(jobs) {
         finishBtn.addEventListener('click', () => finishJob(job.id));
         actions.appendChild(finishBtn);
       }
-
       const messageText = String(job.message || '');
       const needFiveMinuteConfirm = messageText.includes('less than 5 minutes left');
       if (isOwner && !job.stop_confirmed && needFiveMinuteConfirm && !promptedTimeoutConfirmJobs.has(job.id)) {
@@ -629,32 +690,34 @@ function renderRecentJobs(jobs) {
         }, 0);
       }
     }
-
     if (job.status === 'Runing' && String(job.message || '').includes('Unconfirmed Stop in 5 minutes')) {
       const alert = document.createElement('div');
       alert.className = 'job-alert';
       alert.textContent = 'Only 5 minutes left. Please confirm in popup whether jobs can end on time.';
       item.appendChild(alert);
     }
-
     if (job.status === 'Runing' && String(job.message || '').includes('Unconfirmed Stop in 5 minutes')) {
       const alert = document.createElement('div');
       alert.className = 'job-alert';
       alert.textContent = 'Unconfirmed Stop in 5 minutes';
       item.appendChild(alert);
     }
-
     if (job.status === 'Runing' && String(job.message || '').includes('pending finish')) {
       const alert = document.createElement('div');
       alert.className = 'job-alert';
       alert.textContent = 'Time is up: this Running Job is waiting for manual Finish.';
       item.appendChild(alert);
     }
-
+    if (jobUartPaths.length && isOwner && expandedUartJobs.has(String(job.id))) {
+      const panel = document.createElement('div');
+      panel.className = 'uart-job-console';
+      panel.style.gridColumn = '1 / -1';
+      renderUartPanel(panel, String(job.id), jobUartPaths);
+      item.appendChild(panel);
+    }
     recentJobs.appendChild(item);
   });
 }
-
 async function refreshRecentJobs() {
   const response = await fetch('/api/jobs');
   if (!response.ok) return;
@@ -664,7 +727,6 @@ async function refreshRecentJobs() {
   Array.from(promptedTimeoutConfirmJobs).forEach((jobId) => {
     if (!runningIds.has(jobId)) promptedTimeoutConfirmJobs.delete(jobId);
   });
-
   const modal = ensureStopConfirmModal();
   const currentModalJobId = modal.overlay.dataset.jobId;
   if (modal.overlay.style.display !== 'none' && currentModalJobId) {
@@ -675,7 +737,6 @@ async function refreshRecentJobs() {
   }
   renderRecentJobs(jobs);
 }
-
 async function bootstrap() {
   try {
     const sessionResp = await fetch('/api/session');
@@ -685,13 +746,12 @@ async function bootstrap() {
       currentUserId = session.user_id || currentUserId;
     }
   } catch (_) {}
-
   initJobsTimingSettings();
   createNewJobCard();
+  connectUartSocket();
   refreshRecentJobs();
   refreshWaitingJobs();
   setInterval(() => { refreshRecentJobs(); refreshWaitingJobs(); }, 2000);
 }
-
 form.addEventListener('submit', submitJobs);
 bootstrap();

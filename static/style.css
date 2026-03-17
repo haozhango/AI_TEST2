@@ -241,3 +241,91 @@ button { padding: 9px 12px; border: none; border-radius: 7px; cursor: pointer; b
 .stop-confirm-message { font-size: 14px; color: #111827; }
 .stop-confirm-countdown { font-size: 13px; color: #b45309; }
 .stop-confirm-actions { display: flex; justify-content: flex-end; gap: 10px; }
+
+.page-header {
+  margin-bottom: 14px;
+}
+
+.nav-link-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  background: #1d4ed8;
+  color: #fff;
+  border-radius: 7px;
+  padding: 9px 12px;
+  font-size: 14px;
+}
+
+.uart-console-container {
+  max-width: 1400px;
+}
+
+.uart-console-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.uart-console-toolbar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+}
+
+.uart-output {
+  min-height: 65vh;
+  max-height: 70vh;
+  overflow: auto;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 12px;
+  background: #0b1220;
+  color: #d1fae5;
+  font-size: 13px;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.uart-job-console {
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 10px;
+  overflow-x: hidden;
+}
+
+.uart-columns {
+  display: grid;
+  gap: 10px;
+}
+
+.uart-column {
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #e2e8f0;
+  overflow: hidden;
+}
+
+.uart-column-title {
+  background: #1e293b;
+  padding: 8px 10px;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.uart-column-output {
+  margin: 0;
+  padding: 10px;
+  min-height: 180px;
+  max-height: 300px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  line-height: 1.45;
+}
