@@ -8,6 +8,13 @@ import socket
 import subprocess
 import threading
 import uuid
+
+try:
+    import fcntl
+    import termios
+except ImportError:  # pragma: no cover
+    fcntl = None
+    termios = None
 from dataclasses import dataclass, field
 from collections import defaultdict, deque
 from datetime import datetime, timedelta
@@ -154,7 +161,28 @@ class UartStreamManager:
             "ts": datetime.now().isoformat(timespec="seconds"),
         })
         try:
-            with serial.Serial(device, baudrate=115200, timeout=0.5) as uart:
+            open_kwargs = {"baudrate": 115200, "timeout": 0.5, "exclusive": True}
+            try:
+                uart = serial.Serial(device, **open_kwargs)
+            except TypeError:
+                # Older pyserial may not support "exclusive" kwarg.
+                open_kwargs.pop("exclusive", None)
+                uart = serial.Serial(device, **open_kwargs)
+
+            with uart:
+                if fcntl is not None and termios is not None and hasattr(termios, "TIOCEXCL"):
+                    try:
+                        fcntl.ioctl(uart.fileno(), termios.TIOCEXCL)
+                    except OSError:
+                        # Some drivers/pty devices do not support TIOCEXCL; continue with best-effort lock.
+                        pass
+                self._append_and_broadcast({
+                    "type": "status",
+                    "job_id": job_id,
+                    "device": device,
+                    "line": f"[{job_id}] {device} locked exclusively",
+                    "ts": datetime.now().isoformat(timespec="seconds"),
+                })
                 while not stop_event.is_set():
                     raw = uart.readline()
                     if not raw:
