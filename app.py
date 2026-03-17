@@ -133,9 +133,12 @@ class UartStreamManager:
     def stop_capture(self, job_id: str) -> None:
         with self._lock:
             targets = [key for key in self._threads if key[0] == job_id]
-            stops = [self._threads.pop(key)[0] for key in targets]
-        for stop_event in stops:
+            workers = [self._threads.pop(key) for key in targets]
+
+        for stop_event, _ in workers:
             stop_event.set()
+        for _, thread in workers:
+            thread.join(timeout=2.0)
 
     def _append_and_broadcast(self, message: dict[str, str]) -> None:
         device = message.get("device", "unknown")
@@ -164,12 +167,35 @@ class UartStreamManager:
         })
         try:
             open_kwargs = {"baudrate": 115200, "timeout": 0.5, "exclusive": True}
-            try:
-                uart = serial.Serial(device, **open_kwargs)
-            except TypeError:
-                # Older pyserial may not support "exclusive" kwarg.
-                open_kwargs.pop("exclusive", None)
-                uart = serial.Serial(device, **open_kwargs)
+            uart = None
+            warned_busy = False
+            while not stop_event.is_set():
+                try:
+                    uart = serial.Serial(device, **open_kwargs)
+                    break
+                except TypeError:
+                    # Older pyserial may not support "exclusive" kwarg.
+                    open_kwargs.pop("exclusive", None)
+                    uart = serial.Serial(device, **open_kwargs)
+                    break
+                except Exception as open_exc:
+                    message = str(open_exc).lower()
+                    is_busy = any(token in message for token in ("resource busy", "device or resource busy", "permission denied", "could not exclusively lock"))
+                    if not is_busy:
+                        raise
+                    if not warned_busy:
+                        warned_busy = True
+                        self._append_and_broadcast({
+                            "type": "status",
+                            "job_id": job_id,
+                            "device": device,
+                            "line": f"[{job_id}] waiting for UART release: {open_exc}",
+                            "ts": datetime.now().isoformat(timespec="seconds"),
+                        })
+                    time.sleep(0.3)
+
+            if uart is None:
+                return
 
             with uart:
                 if fcntl is not None and termios is not None and hasattr(termios, "TIOCEXCL"):
