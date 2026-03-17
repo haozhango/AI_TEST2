@@ -92,7 +92,7 @@ function renderUartPanel(panel, jobId, uartPaths) {
   }
   const grid = document.createElement('div');
   grid.className = 'uart-columns';
-  grid.style.gridTemplateColumns = `repeat(${sourceDevices.length}, minmax(300px, 1fr))`;
+  grid.style.gridTemplateColumns = `repeat(${Math.min(2, sourceDevices.length)}, minmax(300px, 1fr))`;
   sourceDevices.forEach((device) => {
     const column = document.createElement('div');
     column.className = 'uart-column';
