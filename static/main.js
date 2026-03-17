@@ -648,7 +648,8 @@ function renderRecentJobs(jobs) {
     copyBtn.addEventListener('click', () => createNewJobCard(payload, null, { regenerateJobsId: true }));
     actions.appendChild(copyBtn);
     const jobUartPaths = Array.isArray(payload.uart_paths) ? payload.uart_paths : [];
-    if (jobUartPaths.length) {
+    const isOwner = String(payload.user_id || '') === currentUserId;
+    if (jobUartPaths.length && isOwner) {
       const uartBtn = document.createElement('button');
       const expanded = expandedUartJobs.has(String(job.id));
       uartBtn.textContent = expanded ? 'Hide UART Console' : 'Open UART Console';
@@ -664,7 +665,6 @@ function renderRecentJobs(jobs) {
       actions.appendChild(uartBtn);
     }
     if (job.status === 'Runing') {
-      const isOwner = String(payload.user_id || '') === currentUserId;
       if (isOwner) {
         const stopAndResubmitBtn = document.createElement('button');
         stopAndResubmitBtn.textContent = 'Stop and Resubmit';
@@ -708,7 +708,7 @@ function renderRecentJobs(jobs) {
       alert.textContent = 'Time is up: this Running Job is waiting for manual Finish.';
       item.appendChild(alert);
     }
-    if (jobUartPaths.length && expandedUartJobs.has(String(job.id))) {
+    if (jobUartPaths.length && isOwner && expandedUartJobs.has(String(job.id))) {
       const panel = document.createElement('div');
       panel.className = 'uart-job-console';
       panel.style.gridColumn = '1 / -1';
