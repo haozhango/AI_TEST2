@@ -12,6 +12,7 @@ const promptedTimeoutConfirmJobs = new Set();
 let stopConfirmModal = null;
 const expandedUartJobs = new Set();
 const uartBuffers = new Map();
+const uartLastLineSeen = new Map();
 let uartSocket = null;
 let uartPingTimer = null;
 function ensureUartJobDevice(jobId, device) {
@@ -23,7 +24,15 @@ function ensureUartJobDevice(jobId, device) {
   return devices.get(devKey);
 }
 function appendUartLine(jobId, device, line, ts) {
-  const list = ensureUartJobDevice(jobId, device);
+  const jobKey = String(jobId || '');
+  const devKey = String(device || 'unknown');
+  const dedupKey = `${jobKey}::${devKey}`;
+  const now = Date.now();
+  const prev = uartLastLineSeen.get(dedupKey);
+  if (prev && prev.line === line && (now - prev.at) < 700) return;
+  uartLastLineSeen.set(dedupKey, { line, at: now });
+
+  const list = ensureUartJobDevice(jobKey, devKey);
   list.push(`[${ts}] ${line}`);
   if (list.length > 500) list.shift();
 }
@@ -60,7 +69,9 @@ function connectUartSocket() {
       if (!jobCard || !expandedUartJobs.has(String(msg.job_id || ''))) return;
       const panel = jobCard.querySelector('.uart-job-console');
       if (!panel) return;
-      renderUartPanel(panel, String(msg.job_id || ''), []);
+      if (!patchUartPanelLine(panel, String(msg.job_id || ''), msg.device || 'unknown')) {
+        renderUartPanel(panel, String(msg.job_id || ''), []);
+      }
     } catch (_) {}
   };
   uartSocket.onclose = () => {
@@ -81,14 +92,17 @@ function renderUartPanel(panel, jobId, uartPaths) {
   }
   const grid = document.createElement('div');
   grid.className = 'uart-columns';
+  grid.style.gridTemplateColumns = `repeat(${sourceDevices.length}, minmax(300px, 1fr))`;
   sourceDevices.forEach((device) => {
     const column = document.createElement('div');
     column.className = 'uart-column';
+    column.dataset.device = device;
     const title = document.createElement('div');
     title.className = 'uart-column-title';
     title.textContent = device;
     const pre = document.createElement('pre');
     pre.className = 'uart-column-output';
+    pre.dataset.device = device;
     const lines = devicesMap.get(device) || [];
     pre.textContent = lines.length ? lines.join('\n') : `Waiting output from ${device} ...`;
     pre.scrollTop = pre.scrollHeight;
@@ -102,6 +116,17 @@ function renderUartPanel(panel, jobId, uartPaths) {
       node.scrollTop = node.scrollHeight;
     });
   });
+}
+
+function patchUartPanelLine(panel, jobId, device) {
+  const targetDevice = String(device || 'unknown');
+  const pre = panel.querySelector(`.uart-column-output[data-device="${CSS.escape(targetDevice)}"]`);
+  if (!pre) return false;
+  const devicesMap = uartBuffers.get(String(jobId)) || new Map();
+  const lines = devicesMap.get(targetDevice) || [];
+  pre.textContent = lines.length ? lines.join('\n') : `Waiting output from ${targetDevice} ...`;
+  pre.scrollTop = pre.scrollHeight;
+  return true;
 }
 function findRecentJobCard(jobId) {
   const targetId = String(jobId);

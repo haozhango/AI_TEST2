@@ -199,7 +199,7 @@ class UartStreamManager:
                         prev = self._last_line_seen.get(dedup_key)
                         self._last_line_seen[dedup_key] = (line, now_mono)
                     # Filter accidental immediate duplicate sampling caused by some UART adapters/drivers.
-                    if prev and prev[0] == line and (now_mono - prev[1]) < 0.12:
+                    if prev and prev[0] == line and (now_mono - prev[1]) < 0.6:
                         continue
 
                     self._append_and_broadcast({
