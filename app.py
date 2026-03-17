@@ -9,6 +9,7 @@ import subprocess
 import threading
 import uuid
 import time
+import shlex
 
 try:
     import fcntl
@@ -20,7 +21,7 @@ from dataclasses import dataclass, field
 from collections import defaultdict, deque
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
@@ -67,7 +68,7 @@ class SubmitJobsRequest(BaseModel):
 class JobRecord:
     id: str
     payload: dict[str, Any]
-    status: Literal["Runing", "Finish", "Stopped", "Failed"]
+    status: str
     submit_time: str
     end_time: str | None = None
     message: str = ""
@@ -280,6 +281,7 @@ class JobManager:
     MAX_RECENT_JOBS = 10
     STOP_CONFIRM_REMINDER_MINUTES = 5
     STOP_GRACE_MINUTES = 5
+    CFGSHELL_CONFIG_FILE = APP_ROOT / "cfgshell.conf"
 
     def __init__(self, uart_stream: UartStreamManager) -> None:
         self._jobs: dict[str, JobRecord] = {}
@@ -307,6 +309,10 @@ class JobManager:
         return job
 
     def _launch_job_process_locked(self, job: JobRecord) -> None:
+        self._run_db_prepare_scripts_locked(job)
+        if not self._is_running_status(job.status):
+            return
+
         command = self._build_job_command(job.payload)
         log_path = (job.payload or {}).get("log_path", "").strip()
         if log_path:
@@ -328,6 +334,68 @@ class JobManager:
         self._uart_stream.start_capture(job.id, uart_paths)
         threading.Thread(target=self._watch_job, args=(job.id, job.run_token), daemon=True).start()
 
+    @staticmethod
+    def _is_running_status(status: str) -> bool:
+        return str(status).startswith("Runing") or str(status).startswith("Running")
+
+    def _read_cfgshell_config(self) -> tuple[list[str], str]:
+        path = self.CFGSHELL_CONFIG_FILE
+        if not path.exists():
+            raise ValueError(f"missing config file: {path}")
+
+        lines = [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        if len(lines) < 2:
+            raise ValueError(f"invalid config file {path}, expected at least 2 lines")
+
+        shell_cmd = shlex.split(lines[0])
+        if not shell_cmd:
+            raise ValueError("cfgshell command is empty in config line 1")
+        return shell_cmd, lines[1]
+
+    def _run_db_prepare_scripts_locked(self, job: JobRecord) -> None:
+        payload = job.payload or {}
+        db_enabled = bool(payload.get("database_path_enabled", True))
+        reset_enabled = bool(payload.get("reset_script_enabled", True))
+        database_path = str(payload.get("database_path") or "").strip()
+        reset_script = str(payload.get("reset_script") or "").strip()
+
+        if not (db_enabled and reset_enabled and database_path and reset_script):
+            return
+
+        log_file = None
+        try:
+            cfgshell_cmd, db_load_script = self._read_cfgshell_config()
+            log_path = str(payload.get("log_path") or "").strip()
+            if log_path:
+                path = Path(log_path)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                log_file = path.open("a", encoding="utf-8")
+
+            job.status = "Runing::Loading HAPS_DB"
+            rc1 = subprocess.run([*cfgshell_cmd, db_load_script, database_path], stdout=log_file, stderr=log_file, text=True).returncode
+            if rc1 != 0:
+                job.status = "Failed"
+                job.end_time = datetime.now().isoformat(timespec="seconds")
+                job.message = f"HAPS_DB load failed (exit={rc1})"
+                return
+
+            job.status = "Running::Reset HAPS_ENV"
+            rc2 = subprocess.run([*cfgshell_cmd, reset_script], stdout=log_file, stderr=log_file, text=True).returncode
+            if rc2 != 0:
+                job.status = "Failed"
+                job.end_time = datetime.now().isoformat(timespec="seconds")
+                job.message = f"HAPS_ENV reset failed (exit={rc2})"
+                return
+
+            job.status = "Runing:HAPS_RDY"
+        except Exception as exc:
+            job.status = "Failed"
+            job.end_time = datetime.now().isoformat(timespec="seconds")
+            job.message = f"db/reset prepare failed: {exc}"
+        finally:
+            if log_file is not None:
+                log_file.close()
+
 
     @staticmethod
     def _duration_minutes(payload: dict[str, Any]) -> int:
@@ -336,11 +404,10 @@ class JobManager:
         except (TypeError, ValueError):
             return 0
 
-    @staticmethod
-    def _active_running_for_platform(jobs: dict[str, JobRecord], order: list[str], platform: str) -> JobRecord | None:
+    def _active_running_for_platform(self, jobs: dict[str, JobRecord], order: list[str], platform: str) -> JobRecord | None:
         for job_id in order:
             job = jobs.get(job_id)
-            if not job or job.status != "Runing":
+            if not job or not self._is_running_status(job.status):
                 continue
             if (job.payload or {}).get("haps_platform") == platform:
                 return job
@@ -440,7 +507,7 @@ class JobManager:
                 return
             self._uart_stream.stop_capture(job_id)
             # If timeout/manual handlers already finalized this job, preserve that status.
-            if current.status != "Runing":
+            if not self._is_running_status(current.status):
                 return
             current.end_time = datetime.now().isoformat(timespec="seconds")
             if rc == 0:
@@ -457,7 +524,7 @@ class JobManager:
             job = self._jobs.get(job_id)
             if not job:
                 raise KeyError(job_id)
-            if job.status != "Runing":
+            if not self._is_running_status(job.status):
                 return job
             process = job.process
 
@@ -486,7 +553,7 @@ class JobManager:
             owner = str((job.payload or {}).get("user_id") or "")
             if owner != user_id:
                 raise PermissionError("can only confirm own running job")
-            if job.status != "Runing":
+            if not self._is_running_status(job.status):
                 return job
             job.stop_confirmed = True
             job.stop_confirm_time = datetime.now().isoformat(timespec="seconds")
@@ -501,7 +568,7 @@ class JobManager:
             owner = str((job.payload or {}).get("user_id") or "")
             if owner != user_id:
                 raise PermissionError("can only resubmit own running job")
-            if job.status != "Runing":
+            if not self._is_running_status(job.status):
                 raise ValueError("job is not running")
             process = job.process
             self._uart_stream.stop_capture(job_id)
@@ -523,7 +590,7 @@ class JobManager:
             current = self._jobs.get(job_id)
             if not current:
                 raise KeyError(job_id)
-            if current.status != "Runing":
+            if not self._is_running_status(current.status):
                 raise ValueError("job is not running")
             current.end_time = None
             current.message = "job stopped and resubmitted with original timer"
@@ -550,7 +617,7 @@ class JobManager:
         now = datetime.now()
         for job_id in list(self._order):
             job = self._jobs.get(job_id)
-            if not job or job.status != "Runing":
+            if not job or not self._is_running_status(job.status):
                 continue
             payload = job.payload or {}
             duration_minutes = self._duration_minutes(payload)
@@ -647,7 +714,7 @@ class JobManager:
         start_time, running = self._estimate_waiting_schedule(waiting.id)
         now = datetime.now()
         wait_seconds = max(0, int((start_time - now).total_seconds())) if start_time else 0
-        overdue = bool(start_time and now >= start_time and running and running.status == "Runing")
+        overdue = bool(start_time and now >= start_time and running and self._is_running_status(running.status))
         return {
             "id": waiting.id,
             "submit_time": waiting.submit_time,
