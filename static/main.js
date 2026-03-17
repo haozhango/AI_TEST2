@@ -93,10 +93,12 @@ function renderUartPanel(panel, jobId, uartPaths) {
   const grid = document.createElement('div');
   grid.className = 'uart-columns';
   grid.style.gridTemplateColumns = `repeat(${Math.min(2, sourceDevices.length)}, minmax(300px, 1fr))`;
-  sourceDevices.forEach((device) => {
+  sourceDevices.forEach((device, index) => {
     const column = document.createElement('div');
     column.className = 'uart-column';
     column.dataset.device = device;
+    const isOddLast = sourceDevices.length > 1 && (sourceDevices.length % 2 === 1) && index === sourceDevices.length - 1;
+    if (isOddLast) column.style.gridColumn = '1 / -1';
     const title = document.createElement('div');
     title.className = 'uart-column-title';
     title.textContent = device;
