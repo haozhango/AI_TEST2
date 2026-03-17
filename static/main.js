@@ -107,9 +107,26 @@ function closeStopConfirmModal() {
   }
 }
 
-function showStopConfirmModal(jobId) {
+function resolveStopDeadline(job) {
+  if (!job) return Date.now() + 5 * 60 * 1000;
+
+  const payload = job.payload || {};
+  const durationMinutes = Number(payload.duration_minutes || 0);
+  const submitAt = Date.parse(job.submit_time || '');
+  if (!Number.isFinite(durationMinutes) || durationMinutes <= 0 || Number.isNaN(submitAt)) {
+    return Date.now() + 5 * 60 * 1000;
+  }
+
+  const timeoutAt = submitAt + durationMinutes * 60 * 1000;
+  const messageText = String(job.message || '');
+  if (messageText.includes('Unconfirmed Stop in 5 minutes')) return timeoutAt + 5 * 60 * 1000;
+  return timeoutAt;
+}
+
+function showStopConfirmModal(job) {
   const modal = ensureStopConfirmModal();
-  const deadline = Date.now() + 5 * 60 * 1000;
+  const jobId = job && job.id;
+  const deadline = resolveStopDeadline(job);
   modal.overlay.dataset.jobId = String(jobId);
   modal.message.textContent = 'Runing Jobs will finish in 5mins, PLS Confirm!!!';
   const updateCountdown = () => {
@@ -519,17 +536,16 @@ function renderWaitingJobs(jobs) {
       <div class="kv"><span class="key">HAPS Platform</span><span class="val">${payload.haps_platform || '-'}</span></div>
       <div class="kv"><span class="key">Wait Time</span><span class="val">${formatWait(job.wait_seconds)}</span></div>
       <div class="kv"><span class="key">Running User</span><span class="val">${job.running_user_id || '-'}</span></div>
-      <div class="actions waiting-actions"></div>
     `;
 
-    const actions = item.querySelector('.waiting-actions');
     if ((payload.user_id || '') === currentUserId) {
       const delBtn = document.createElement('button');
       delBtn.type = 'button';
-      delBtn.className = 'delete-btn';
+      delBtn.className = 'delete-btn waiting-delete-btn';
       delBtn.textContent = '×';
+      delBtn.title = 'Delete waiting job';
       delBtn.addEventListener('click', () => cancelWaitingJob(job.id));
-      actions.appendChild(delBtn);
+      item.appendChild(delBtn);
     }
 
     if (job.overdue) {
@@ -609,7 +625,7 @@ function renderRecentJobs(jobs) {
       if (isOwner && !job.stop_confirmed && needFiveMinuteConfirm && !promptedTimeoutConfirmJobs.has(job.id)) {
         promptedTimeoutConfirmJobs.add(job.id);
         window.setTimeout(async () => {
-          showStopConfirmModal(job.id);
+          showStopConfirmModal(job);
         }, 0);
       }
     }
