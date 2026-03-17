@@ -82,16 +82,21 @@ class UartStreamManager:
     def __init__(self) -> None:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._connections: set[WebSocket] = set()
-        self._buffers: dict[str, deque[dict[str, str]]] = defaultdict(lambda: deque(maxlen=self.MAX_LINES_PER_DEVICE))
+        self._buffers: dict[str, dict[str, deque[dict[str, str]]]] = defaultdict(
+            lambda: defaultdict(lambda: deque(maxlen=self.MAX_LINES_PER_DEVICE))
+        )
         self._threads: dict[tuple[str, str], tuple[threading.Event, threading.Thread]] = {}
         self._lock = threading.Lock()
 
     def attach_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         self._loop = loop
 
-    def snapshot(self) -> dict[str, list[dict[str, str]]]:
+    def snapshot(self) -> dict[str, dict[str, list[dict[str, str]]]]:
         with self._lock:
-            return {device: list(lines) for device, lines in self._buffers.items()}
+            return {
+                job_id: {device: list(lines) for device, lines in by_device.items()}
+                for job_id, by_device in self._buffers.items()
+            }
 
     def register(self, websocket: WebSocket) -> None:
         with self._lock:
@@ -125,14 +130,16 @@ class UartStreamManager:
 
     def _append_and_broadcast(self, message: dict[str, str]) -> None:
         device = message.get("device", "unknown")
+        job_id = message.get("job_id", "")
         with self._lock:
-            self._buffers[device].append(message)
+            self._buffers[job_id][device].append(message)
         self._broadcast(message)
 
     def _read_serial_worker(self, job_id: str, device: str, stop_event: threading.Event) -> None:
         if serial is None:
             self._append_and_broadcast({
                 "type": "status",
+                "job_id": job_id,
                 "device": device,
                 "line": "pyserial is not installed on server",
                 "ts": datetime.now().isoformat(timespec="seconds"),
@@ -141,6 +148,7 @@ class UartStreamManager:
 
         self._append_and_broadcast({
             "type": "status",
+            "job_id": job_id,
             "device": device,
             "line": f"[{job_id}] opening {device}",
             "ts": datetime.now().isoformat(timespec="seconds"),
@@ -156,6 +164,7 @@ class UartStreamManager:
                         continue
                     self._append_and_broadcast({
                         "type": "line",
+                        "job_id": job_id,
                         "device": device,
                         "line": line,
                         "ts": datetime.now().isoformat(timespec="seconds"),
@@ -163,6 +172,7 @@ class UartStreamManager:
         except Exception as exc:
             self._append_and_broadcast({
                 "type": "status",
+                "job_id": job_id,
                 "device": device,
                 "line": f"[{job_id}] serial read failed: {exc}",
                 "ts": datetime.now().isoformat(timespec="seconds"),
@@ -172,6 +182,7 @@ class UartStreamManager:
                 self._threads.pop((job_id, device), None)
             self._append_and_broadcast({
                 "type": "status",
+                "job_id": job_id,
                 "device": device,
                 "line": f"[{job_id}] closed {device}",
                 "ts": datetime.now().isoformat(timespec="seconds"),
@@ -760,17 +771,11 @@ async def _on_startup() -> None:
 def index() -> FileResponse:
     return FileResponse(APP_ROOT / "static" / "index.html")
 
-
-@app.get("/uart-console")
-def uart_console_page() -> FileResponse:
-    return FileResponse(APP_ROOT / "static" / "uart_console.html")
-
-
 @app.websocket("/ws/uart")
 async def ws_uart(websocket: WebSocket) -> None:
     await websocket.accept()
     uart_stream_manager.register(websocket)
-    await websocket.send_json({"type": "snapshot", "devices": uart_stream_manager.snapshot()})
+    await websocket.send_json({"type": "snapshot", "jobs": uart_stream_manager.snapshot()})
     try:
         while True:
             await websocket.receive_text()

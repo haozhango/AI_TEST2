@@ -289,3 +289,43 @@ button { padding: 9px 12px; border: none; border-radius: 7px; cursor: pointer; b
   line-height: 1.45;
   margin: 0;
 }
+
+.uart-job-console {
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 10px;
+}
+
+.uart-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+}
+
+.uart-column {
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #e2e8f0;
+  overflow: hidden;
+}
+
+.uart-column-title {
+  background: #1e293b;
+  padding: 8px 10px;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.uart-column-output {
+  margin: 0;
+  padding: 10px;
+  min-height: 180px;
+  max-height: 300px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  line-height: 1.45;
+}
