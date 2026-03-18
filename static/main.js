@@ -12,7 +12,6 @@ const promptedTimeoutConfirmJobs = new Set();
 let stopConfirmModal = null;
 const expandedUartJobs = new Set();
 const uartBuffers = new Map();
-const uartLastLineSeen = new Map();
 let uartSocket = null;
 let uartPingTimer = null;
 
@@ -23,12 +22,16 @@ function isRunningStatus(status) {
 
 function statusClassName(status) {
   const text = String(status || '');
-  if (text === 'Running::Loading HAPS_DB;' || text === 'Running::Resetting HAPS_ENV;') return 'running-light';
+  if (text === 'Running::Loading HAPS_DB' || text === 'Running::Loading HAPS_DB;' || text === 'Running::Resetting HAPS_ENV' || text === 'Running::Resetting HAPS_ENV;') return 'running-light';
   if (text === 'Running::HAPS_RDY') return 'running-deep';
   if (isRunningStatus(text)) return 'running-deep';
   if (text === 'Finish') return 'Finish';
   if (text === 'Stopped' || text === 'Failed') return text;
   return '';
+}
+function displayStatusText(status) {
+  const text = String(status || '');
+  return text.replace(/;$/, '');
 }
 
 function ensureUartJobDevice(jobId, device) {
@@ -42,12 +45,6 @@ function ensureUartJobDevice(jobId, device) {
 function appendUartLine(jobId, device, line, ts) {
   const jobKey = String(jobId || '');
   const devKey = String(device || 'unknown');
-  const dedupKey = `${jobKey}::${devKey}`;
-  const now = Date.now();
-  const prev = uartLastLineSeen.get(dedupKey);
-  if (prev && prev.line === line && (now - prev.at) < 700) return;
-  uartLastLineSeen.set(dedupKey, { line, at: now });
-
   const list = ensureUartJobDevice(jobKey, devKey);
   list.push(`[${ts}] ${line}`);
   if (list.length > 500) list.shift();
@@ -642,7 +639,7 @@ function renderRecentJobs(jobs) {
     item.dataset.jobId = String(job.id);
     item.innerHTML = `
       <div class="kv jobid-kv"><span class="key">JobsID</span><span class="val jobid-val">${payload.jobs_id || '-'}</span></div>
-      <div class="kv status-kv"><span class="key">Status</span><span class="val status ${statusClassName(job.status)}">${job.status}</span></div>
+      <div class="kv status-kv"><span class="key">Status</span><span class="val status ${statusClassName(job.status)}">${displayStatusText(job.status)}</span></div>
       <div class="kv"><span class="key">HAPS Platform</span><span class="val">${payload.haps_platform || '-'}</span></div>
       <div class="kv"><span class="key">Duration</span><span class="val">${payload.duration_minutes || 0} min</span></div>
       <div class="kv"><span class="key">Endtime</span><span class="val">${job.end_time || '-'}</span></div>

@@ -95,7 +95,6 @@ class UartStreamManager:
             lambda: defaultdict(lambda: deque(maxlen=self.MAX_LINES_PER_DEVICE))
         )
         self._threads: dict[tuple[str, str], tuple[threading.Event, threading.Thread]] = {}
-        self._last_line_seen: dict[tuple[str, str], tuple[str, float]] = {}
         self._lock = threading.Lock()
 
     def attach_loop(self, loop: asyncio.AbstractEventLoop) -> None:
@@ -220,16 +219,6 @@ class UartStreamManager:
                     if not line:
                         continue
 
-                    dedup_key = (job_id, device)
-                    now_mono = time.monotonic()
-                    with self._lock:
-                        prev = self._last_line_seen.get(dedup_key)
-                        self._last_line_seen[dedup_key] = (line, now_mono)
-                    # Filter accidental duplicate sampling caused by some UART adapters/drivers.
-                    # Keep a slightly larger window to avoid repeated echo of the same line.
-                    if prev and prev[0] == line and (now_mono - prev[1]) < 2.0:
-                        continue
-
                     self._append_and_broadcast({
                         "type": "line",
                         "job_id": job_id,
@@ -248,7 +237,6 @@ class UartStreamManager:
         finally:
             with self._lock:
                 self._threads.pop((job_id, device), None)
-                self._last_line_seen.pop((job_id, device), None)
             self._append_and_broadcast({
                 "type": "status",
                 "job_id": job_id,
@@ -294,7 +282,7 @@ class JobManager:
 
     def _start_job(self, payload: dict[str, Any]) -> JobRecord:
         now = datetime.now().isoformat(timespec="seconds")
-        initial_status = "Running::Loading HAPS_DB;" if self._should_run_prepare(payload) else "Running::HAPS_RDY"
+        initial_status = "Running::Loading HAPS_DB" if self._should_run_prepare(payload) else "Running::HAPS_RDY"
         job = JobRecord(
             id=str(uuid.uuid4()),
             payload=payload,
@@ -367,7 +355,7 @@ class JobManager:
                 with self._lock:
                     if not self._job_is_current_locked(job_id, run_token):
                         return
-                    self._jobs[job_id].status = "Running::Loading HAPS_DB;"
+                    self._jobs[job_id].status = "Running::Loading HAPS_DB"
 
                 rc1 = subprocess.run([*cfgshell_cmd, db_load_script, database_path], stdout=log_file, stderr=log_file, text=True).returncode
                 if rc1 != 0:
@@ -379,13 +367,13 @@ class JobManager:
                             self._promote_waiting_locked()
                     return
 
-                # Add a short settle delay between DB load and reset to avoid timing races.
-                time.sleep(5)
+                # Add a settle delay between DB load and reset to avoid timing races.
+                time.sleep(20)
 
                 with self._lock:
                     if not self._job_is_current_locked(job_id, run_token):
                         return
-                    self._jobs[job_id].status = "Running::Resetting HAPS_ENV;"
+                    self._jobs[job_id].status = "Running::Resetting HAPS_ENV"
 
                 rc2 = subprocess.run([*cfgshell_cmd, reset_script], stdout=log_file, stderr=log_file, text=True).returncode
                 if rc2 != 0:
