@@ -15,6 +15,7 @@ const uartBuffers = new Map();
 const uartLastLineSeen = new Map();
 let uartSocket = null;
 let uartPingTimer = null;
+let uartReconnectTimer = null;
 
 function isRunningStatus(status) {
   const text = String(status || '');
@@ -63,6 +64,11 @@ function consumeUartSnapshot(jobs) {
   });
 }
 function connectUartSocket() {
+  if (uartSocket && (uartSocket.readyState === WebSocket.OPEN || uartSocket.readyState === WebSocket.CONNECTING)) return;
+  if (uartReconnectTimer) {
+    window.clearTimeout(uartReconnectTimer);
+    uartReconnectTimer = null;
+  }
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   uartSocket = new WebSocket(`${protocol}//${window.location.host}/ws/uart`);
   uartSocket.onopen = () => {
@@ -95,7 +101,11 @@ function connectUartSocket() {
       window.clearInterval(uartPingTimer);
       uartPingTimer = null;
     }
-    window.setTimeout(connectUartSocket, 1500);
+    uartSocket = null;
+    uartReconnectTimer = window.setTimeout(() => {
+      uartReconnectTimer = null;
+      connectUartSocket();
+    }, 1500);
   };
 }
 function renderUartPanel(panel, jobId, uartPaths) {
@@ -564,7 +574,6 @@ async function submitJobs(event) {
   newJobsList.innerHTML = '';
   initJobsTimingSettings();
   createNewJobCard();
-  connectUartSocket();
   refreshRecentJobs();
   refreshWaitingJobs();
 }

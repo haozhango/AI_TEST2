@@ -121,6 +121,12 @@ class UartStreamManager:
         if not unique_paths:
             return
 
+        # UART capture is single-owner: only the current running job can hold listeners.
+        with self._lock:
+            previous_job_ids = {running_job_id for running_job_id, _ in self._threads.keys() if running_job_id != job_id}
+        for previous_job_id in previous_job_ids:
+            self.stop_capture(previous_job_id)
+
         for device in unique_paths:
             key = (job_id, device)
             with self._lock:
@@ -343,6 +349,15 @@ class JobManager:
         job = self._jobs.get(job_id)
         return bool(job and job.run_token == run_token and self._is_running_status(job.status))
 
+    def _wait_prepare_delay(self, job_id: str, run_token: int, delay_seconds: int) -> bool:
+        deadline = time.monotonic() + max(0, delay_seconds)
+        while time.monotonic() < deadline:
+            with self._lock:
+                if not self._job_is_current_locked(job_id, run_token):
+                    return False
+            time.sleep(0.2)
+        return True
+
     def _prepare_and_launch_job(self, job_id: str, run_token: int) -> None:
         with self._lock:
             job = self._jobs.get(job_id)
@@ -376,6 +391,9 @@ class JobManager:
                             self._jobs[job_id].end_time = datetime.now().isoformat(timespec="seconds")
                             self._jobs[job_id].message = f"HAPS_DB load failed (exit={rc1})"
                             self._promote_waiting_locked()
+                    return
+
+                if not self._wait_prepare_delay(job_id, run_token, 20):
                     return
 
                 with self._lock:
