@@ -225,8 +225,9 @@ class UartStreamManager:
                     with self._lock:
                         prev = self._last_line_seen.get(dedup_key)
                         self._last_line_seen[dedup_key] = (line, now_mono)
-                    # Filter accidental immediate duplicate sampling caused by some UART adapters/drivers.
-                    if prev and prev[0] == line and (now_mono - prev[1]) < 0.6:
+                    # Filter accidental duplicate sampling caused by some UART adapters/drivers.
+                    # Keep a slightly larger window to avoid repeated echo of the same line.
+                    if prev and prev[0] == line and (now_mono - prev[1]) < 2.0:
                         continue
 
                     self._append_and_broadcast({
@@ -377,6 +378,9 @@ class JobManager:
                             self._jobs[job_id].message = f"HAPS_DB load failed (exit={rc1})"
                             self._promote_waiting_locked()
                     return
+
+                # Add a short settle delay between DB load and reset to avoid timing races.
+                time.sleep(5)
 
                 with self._lock:
                     if not self._job_is_current_locked(job_id, run_token):
