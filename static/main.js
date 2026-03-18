@@ -18,12 +18,12 @@ let uartPingTimer = null;
 
 function isRunningStatus(status) {
   const text = String(status || '');
-  return text.startsWith('Runing') || text.startsWith('Running');
+  return text.startsWith('Running::') || text.startsWith('Runing::') || text === 'Running' || text === 'Runing';
 }
 
 function statusClassName(status) {
   const text = String(status || '');
-  if (text === 'Runing::Loading HAPS_DB' || text === 'Running::Reset HAPS_ENV') return 'running-light';
+  if (text === 'Running::Loading HAPS_DB;' || text === 'Running::Resetting HAPS_ENV;') return 'running-light';
   if (text === 'Running::HAPS_RDY') return 'running-deep';
   if (isRunningStatus(text)) return 'running-deep';
   if (text === 'Finish') return 'Finish';
