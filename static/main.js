@@ -23,7 +23,7 @@ function isRunningStatus(status) {
 
 function statusClassName(status) {
   const text = String(status || '');
-  if (text === 'Running::Loading HAPS_DB' || text === 'Running::Reseting HAPS_ENV') return 'running-light';
+  if (text === 'Running::Loading HAPS_DB' || text === 'Running::Resetting HAPS_ENV') return 'running-light';
   if (text === 'Running::HAPS_RDY') return 'running-deep';
   if (isRunningStatus(text)) return 'running-deep';
   if (text === 'Finish') return 'Finish';
