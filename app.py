@@ -366,7 +366,7 @@ class JobManager:
                 with self._lock:
                     if not self._job_is_current_locked(job_id, run_token):
                         return
-                    self._jobs[job_id].status = "Runing::Loading HAPS_DB"
+                    self._jobs[job_id].status = "Running::Loading HAPS_DB"
 
                 rc1 = subprocess.run([*cfgshell_cmd, db_load_script, database_path], stdout=log_file, stderr=log_file, text=True).returncode
                 if rc1 != 0:
