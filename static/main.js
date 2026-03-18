@@ -15,6 +15,22 @@ const uartBuffers = new Map();
 const uartLastLineSeen = new Map();
 let uartSocket = null;
 let uartPingTimer = null;
+
+function isRunningStatus(status) {
+  const text = String(status || '');
+  return text.startsWith('Runing') || text.startsWith('Running');
+}
+
+function statusClassName(status) {
+  const text = String(status || '');
+  if (text === 'Runing::Loading HAPS_DB' || text === 'Running::Reset HAPS_ENV') return 'running-light';
+  if (text === 'Running::HAPS_RDY') return 'running-deep';
+  if (isRunningStatus(text)) return 'running-deep';
+  if (text === 'Finish') return 'Finish';
+  if (text === 'Stopped' || text === 'Failed') return text;
+  return '';
+}
+
 function ensureUartJobDevice(jobId, device) {
   const jobKey = String(jobId || '');
   const devKey = String(device || 'unknown');
@@ -626,7 +642,7 @@ function renderRecentJobs(jobs) {
     item.dataset.jobId = String(job.id);
     item.innerHTML = `
       <div class="kv jobid-kv"><span class="key">JobsID</span><span class="val jobid-val">${payload.jobs_id || '-'}</span></div>
-      <div class="kv status-kv"><span class="key">Status</span><span class="val status ${job.status}">${job.status}</span></div>
+      <div class="kv status-kv"><span class="key">Status</span><span class="val status ${statusClassName(job.status)}">${job.status}</span></div>
       <div class="kv"><span class="key">HAPS Platform</span><span class="val">${payload.haps_platform || '-'}</span></div>
       <div class="kv"><span class="key">Duration</span><span class="val">${payload.duration_minutes || 0} min</span></div>
       <div class="kv"><span class="key">Endtime</span><span class="val">${job.end_time || '-'}</span></div>
@@ -664,7 +680,7 @@ function renderRecentJobs(jobs) {
       });
       actions.appendChild(uartBtn);
     }
-    if (job.status === 'Runing') {
+    if (isRunningStatus(job.status)) {
       if (isOwner) {
         const stopAndResubmitBtn = document.createElement('button');
         stopAndResubmitBtn.textContent = 'Stop and Resubmit';
@@ -690,19 +706,19 @@ function renderRecentJobs(jobs) {
         }, 0);
       }
     }
-    if (job.status === 'Runing' && String(job.message || '').includes('Unconfirmed Stop in 5 minutes')) {
+    if (isRunningStatus(job.status) && String(job.message || '').includes('Unconfirmed Stop in 5 minutes')) {
       const alert = document.createElement('div');
       alert.className = 'job-alert';
       alert.textContent = 'Only 5 minutes left. Please confirm in popup whether jobs can end on time.';
       item.appendChild(alert);
     }
-    if (job.status === 'Runing' && String(job.message || '').includes('Unconfirmed Stop in 5 minutes')) {
+    if (isRunningStatus(job.status) && String(job.message || '').includes('Unconfirmed Stop in 5 minutes')) {
       const alert = document.createElement('div');
       alert.className = 'job-alert';
       alert.textContent = 'Unconfirmed Stop in 5 minutes';
       item.appendChild(alert);
     }
-    if (job.status === 'Runing' && String(job.message || '').includes('pending finish')) {
+    if (isRunningStatus(job.status) && String(job.message || '').includes('pending finish')) {
       const alert = document.createElement('div');
       alert.className = 'job-alert';
       alert.textContent = 'Time is up: this Running Job is waiting for manual Finish.';
@@ -723,7 +739,7 @@ async function refreshRecentJobs() {
   if (!response.ok) return;
   const data = await response.json();
   const jobs = data.jobs || [];
-  const runningIds = new Set(jobs.filter((job) => job.status === 'Runing').map((job) => job.id));
+  const runningIds = new Set(jobs.filter((job) => isRunningStatus(job.status)).map((job) => job.id));
   Array.from(promptedTimeoutConfirmJobs).forEach((jobId) => {
     if (!runningIds.has(jobId)) promptedTimeoutConfirmJobs.delete(jobId);
   });
@@ -732,7 +748,7 @@ async function refreshRecentJobs() {
   if (modal.overlay.style.display !== 'none' && currentModalJobId) {
     const targetJob = jobs.find((job) => String(job.id) === currentModalJobId);
     const targetMessage = String((targetJob && targetJob.message) || '');
-    const stillNeedsConfirm = Boolean(targetJob && targetJob.status === 'Runing' && !targetJob.stop_confirmed && targetMessage.includes('less than 5 minutes left'));
+    const stillNeedsConfirm = Boolean(targetJob && isRunningStatus(targetJob.status) && !targetJob.stop_confirmed && targetMessage.includes('less than 5 minutes left'));
     if (!stillNeedsConfirm) closeStopConfirmModal();
   }
   renderRecentJobs(jobs);

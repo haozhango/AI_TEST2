@@ -293,7 +293,7 @@ class JobManager:
 
     def _start_job(self, payload: dict[str, Any]) -> JobRecord:
         now = datetime.now().isoformat(timespec="seconds")
-        initial_status = "Runing::Loading HAPS_DB" if self._should_run_prepare(payload) else "Running::Reset HAPS_RDY"
+        initial_status = "Runing::Loading HAPS_DB" if self._should_run_prepare(payload) else "Running::HAPS_RDY"
         job = JobRecord(
             id=str(uuid.uuid4()),
             payload=payload,
@@ -397,7 +397,7 @@ class JobManager:
                 if not self._job_is_current_locked(job_id, run_token):
                     return
                 job = self._jobs[job_id]
-                job.status = "Running::Reset HAPS_RDY"
+                job.status = "Running::HAPS_RDY"
                 command = self._build_job_command(job.payload)
                 process = subprocess.Popen(
                     ["bash", "-lc", command],
