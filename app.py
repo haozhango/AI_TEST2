@@ -293,46 +293,25 @@ class JobManager:
 
     def _start_job(self, payload: dict[str, Any]) -> JobRecord:
         now = datetime.now().isoformat(timespec="seconds")
+        initial_status = "Runing::Loading HAPS_DB" if self._should_run_prepare(payload) else "Running::Reset HAPS_RDY"
         job = JobRecord(
             id=str(uuid.uuid4()),
             payload=payload,
-            status="Runing",
+            status=initial_status,
             submit_time=now,
             message="job started",
         )
-        self._launch_job_process_locked(job)
-
         self._jobs[job.id] = job
         self._order.insert(0, job.id)
         self._prune_jobs_locked()
+        self._launch_job_process_locked(job)
 
         return job
 
     def _launch_job_process_locked(self, job: JobRecord) -> None:
-        self._run_db_prepare_scripts_locked(job)
-        if not self._is_running_status(job.status):
-            return
-
-        command = self._build_job_command(job.payload)
-        log_path = (job.payload or {}).get("log_path", "").strip()
-        if log_path:
-            path = Path(log_path)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            log_file = path.open("a", encoding="utf-8")
-        else:
-            log_file = subprocess.DEVNULL
-
         job.run_token += 1
-        process = subprocess.Popen(
-            ["bash", "-lc", command],
-            stdout=log_file,
-            stderr=log_file,
-            text=True,
-        )
-        job.process = process
-        uart_paths = list((job.payload or {}).get("uart_paths") or [])
-        self._uart_stream.start_capture(job.id, uart_paths)
-        threading.Thread(target=self._watch_job, args=(job.id, job.run_token), daemon=True).start()
+        run_token = job.run_token
+        threading.Thread(target=self._prepare_and_launch_job, args=(job.id, run_token), daemon=True).start()
 
     @staticmethod
     def _is_running_status(status: str) -> bool:
@@ -352,49 +331,91 @@ class JobManager:
             raise ValueError("cfgshell command is empty in config line 1")
         return shell_cmd, lines[1]
 
-    def _run_db_prepare_scripts_locked(self, job: JobRecord) -> None:
-        payload = job.payload or {}
+    @staticmethod
+    def _should_run_prepare(payload: dict[str, Any]) -> bool:
         db_enabled = bool(payload.get("database_path_enabled", True))
         reset_enabled = bool(payload.get("reset_script_enabled", True))
         database_path = str(payload.get("database_path") or "").strip()
         reset_script = str(payload.get("reset_script") or "").strip()
+        return bool(db_enabled and reset_enabled and database_path and reset_script)
 
-        if not (db_enabled and reset_enabled and database_path and reset_script):
-            return
+    def _job_is_current_locked(self, job_id: str, run_token: int) -> bool:
+        job = self._jobs.get(job_id)
+        return bool(job and job.run_token == run_token and self._is_running_status(job.status))
+
+    def _prepare_and_launch_job(self, job_id: str, run_token: int) -> None:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if not job or job.run_token != run_token:
+                return
+            payload = dict(job.payload or {})
 
         log_file = None
         try:
-            cfgshell_cmd, db_load_script = self._read_cfgshell_config()
             log_path = str(payload.get("log_path") or "").strip()
             if log_path:
                 path = Path(log_path)
                 path.parent.mkdir(parents=True, exist_ok=True)
                 log_file = path.open("a", encoding="utf-8")
 
-            job.status = "Runing::Loading HAPS_DB"
-            rc1 = subprocess.run([*cfgshell_cmd, db_load_script, database_path], stdout=log_file, stderr=log_file, text=True).returncode
-            if rc1 != 0:
-                job.status = "Failed"
-                job.end_time = datetime.now().isoformat(timespec="seconds")
-                job.message = f"HAPS_DB load failed (exit={rc1})"
-                return
+            if self._should_run_prepare(payload):
+                cfgshell_cmd, db_load_script = self._read_cfgshell_config()
+                database_path = str(payload.get("database_path") or "").strip()
+                reset_script = str(payload.get("reset_script") or "").strip()
 
-            job.status = "Running::Reset HAPS_ENV"
-            rc2 = subprocess.run([*cfgshell_cmd, reset_script], stdout=log_file, stderr=log_file, text=True).returncode
-            if rc2 != 0:
-                job.status = "Failed"
-                job.end_time = datetime.now().isoformat(timespec="seconds")
-                job.message = f"HAPS_ENV reset failed (exit={rc2})"
-                return
+                with self._lock:
+                    if not self._job_is_current_locked(job_id, run_token):
+                        return
+                    self._jobs[job_id].status = "Runing::Loading HAPS_DB"
 
-            job.status = "Runing:HAPS_RDY"
+                rc1 = subprocess.run([*cfgshell_cmd, db_load_script, database_path], stdout=log_file, stderr=log_file, text=True).returncode
+                if rc1 != 0:
+                    with self._lock:
+                        if self._job_is_current_locked(job_id, run_token):
+                            self._jobs[job_id].status = "Failed"
+                            self._jobs[job_id].end_time = datetime.now().isoformat(timespec="seconds")
+                            self._jobs[job_id].message = f"HAPS_DB load failed (exit={rc1})"
+                            self._promote_waiting_locked()
+                    return
+
+                with self._lock:
+                    if not self._job_is_current_locked(job_id, run_token):
+                        return
+                    self._jobs[job_id].status = "Running::Reset HAPS_ENV"
+
+                rc2 = subprocess.run([*cfgshell_cmd, reset_script], stdout=log_file, stderr=log_file, text=True).returncode
+                if rc2 != 0:
+                    with self._lock:
+                        if self._job_is_current_locked(job_id, run_token):
+                            self._jobs[job_id].status = "Failed"
+                            self._jobs[job_id].end_time = datetime.now().isoformat(timespec="seconds")
+                            self._jobs[job_id].message = f"HAPS_ENV reset failed (exit={rc2})"
+                            self._promote_waiting_locked()
+                    return
+
+            with self._lock:
+                if not self._job_is_current_locked(job_id, run_token):
+                    return
+                job = self._jobs[job_id]
+                job.status = "Running::Reset HAPS_RDY"
+                command = self._build_job_command(job.payload)
+                process = subprocess.Popen(
+                    ["bash", "-lc", command],
+                    stdout=log_file if log_file is not None else subprocess.DEVNULL,
+                    stderr=log_file if log_file is not None else subprocess.DEVNULL,
+                    text=True,
+                )
+                job.process = process
+                uart_paths = list((job.payload or {}).get("uart_paths") or [])
+                self._uart_stream.start_capture(job.id, uart_paths)
+                threading.Thread(target=self._watch_job, args=(job.id, job.run_token), daemon=True).start()
         except Exception as exc:
-            job.status = "Failed"
-            job.end_time = datetime.now().isoformat(timespec="seconds")
-            job.message = f"db/reset prepare failed: {exc}"
-        finally:
-            if log_file is not None:
-                log_file.close()
+            with self._lock:
+                if self._job_is_current_locked(job_id, run_token):
+                    self._jobs[job_id].status = "Failed"
+                    self._jobs[job_id].end_time = datetime.now().isoformat(timespec="seconds")
+                    self._jobs[job_id].message = f"db/reset prepare failed: {exc}"
+                    self._promote_waiting_locked()
 
 
     @staticmethod
@@ -539,6 +560,8 @@ class JobManager:
         with self._lock:
             job = self._jobs[job_id]
             self._uart_stream.stop_capture(job_id)
+            job.run_token += 1
+            job.process = None
             job.status = "Finish"
             job.end_time = datetime.now().isoformat(timespec="seconds")
             job.message = "job manually finished"
@@ -609,6 +632,8 @@ class JobManager:
                 process.kill()
                 process.wait(timeout=5)
         self._uart_stream.stop_capture(job.id)
+        job.run_token += 1
+        job.process = None
         job.status = "Finish"
         job.end_time = datetime.now().isoformat(timespec="seconds")
         job.message = message
