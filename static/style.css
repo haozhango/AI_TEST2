@@ -142,6 +142,8 @@ button { padding: 9px 12px; border: none; border-radius: 7px; cursor: pointer; b
   width: 100% !important;
 }
 .status.Runing { color: #0a66ff; font-weight: 700; }
+.status.running-light { color: #65a30d; font-weight: 700; }
+.status.running-deep { color: #15803d; font-weight: 800; }
 .status.Finish { color: #15803d; font-weight: 700; }
 .status.Stopped, .status.Failed { color: #a11; font-weight: 700; }
 .status-kv .val { display: flex; align-items: center; justify-content: center; text-align: center; }
