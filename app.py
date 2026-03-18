@@ -293,7 +293,7 @@ class JobManager:
 
     def _start_job(self, payload: dict[str, Any]) -> JobRecord:
         now = datetime.now().isoformat(timespec="seconds")
-        initial_status = "Runing::Loading HAPS_DB" if self._should_run_prepare(payload) else "Running::HAPS_RDY"
+        initial_status = "Running::Loading HAPS_DB" if self._should_run_prepare(payload) else "Running::HAPS_RDY"
         job = JobRecord(
             id=str(uuid.uuid4()),
             payload=payload,
@@ -381,7 +381,7 @@ class JobManager:
                 with self._lock:
                     if not self._job_is_current_locked(job_id, run_token):
                         return
-                    self._jobs[job_id].status = "Running::Reset HAPS_ENV"
+                    self._jobs[job_id].status = "Running::Resetting HAPS_ENV"
 
                 rc2 = subprocess.run([*cfgshell_cmd, reset_script], stdout=log_file, stderr=log_file, text=True).returncode
                 if rc2 != 0:
