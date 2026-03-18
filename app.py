@@ -95,6 +95,7 @@ class UartStreamManager:
             lambda: defaultdict(lambda: deque(maxlen=self.MAX_LINES_PER_DEVICE))
         )
         self._threads: dict[tuple[str, str], tuple[threading.Event, threading.Thread]] = {}
+        self._active_job_id: str | None = None
         self._lock = threading.Lock()
 
     def attach_loop(self, loop: asyncio.AbstractEventLoop) -> None:
@@ -120,9 +121,14 @@ class UartStreamManager:
         if not unique_paths:
             return
 
+        stale_workers: list[tuple[threading.Event, threading.Thread]] = []
         for device in unique_paths:
             key = (job_id, device)
             with self._lock:
+                if self._active_job_id != job_id:
+                    stale_keys = [thread_key for thread_key in self._threads if thread_key[0] != job_id]
+                    stale_workers.extend(self._threads.pop(thread_key) for thread_key in stale_keys)
+                    self._active_job_id = job_id
                 if key in self._threads:
                     continue
                 stop_event = threading.Event()
@@ -130,10 +136,17 @@ class UartStreamManager:
                 self._threads[key] = (stop_event, worker)
             worker.start()
 
+        for stop_event, _ in stale_workers:
+            stop_event.set()
+        for _, thread in stale_workers:
+            thread.join(timeout=2.0)
+
     def stop_capture(self, job_id: str) -> None:
         with self._lock:
             targets = [key for key in self._threads if key[0] == job_id]
             workers = [self._threads.pop(key) for key in targets]
+            if self._active_job_id == job_id:
+                self._active_job_id = None
 
         for stop_event, _ in workers:
             stop_event.set()
@@ -144,10 +157,15 @@ class UartStreamManager:
         device = message.get("device", "unknown")
         job_id = message.get("job_id", "")
         with self._lock:
+            if self._active_job_id and job_id != self._active_job_id:
+                return
             self._buffers[job_id][device].append(message)
         self._broadcast(message)
 
     def _read_serial_worker(self, job_id: str, device: str, stop_event: threading.Event) -> None:
+        with self._lock:
+            if self._active_job_id != job_id:
+                return
         if serial is None:
             self._append_and_broadcast({
                 "type": "status",
@@ -170,6 +188,9 @@ class UartStreamManager:
             uart = None
             warned_busy = False
             while not stop_event.is_set():
+                with self._lock:
+                    if self._active_job_id != job_id:
+                        return
                 try:
                     uart = serial.Serial(device, **open_kwargs)
                     break
@@ -212,6 +233,9 @@ class UartStreamManager:
                     "ts": datetime.now().isoformat(timespec="seconds"),
                 })
                 while not stop_event.is_set():
+                    with self._lock:
+                        if self._active_job_id != job_id:
+                            return
                     raw = uart.readline()
                     if not raw:
                         continue
@@ -491,10 +515,7 @@ class JobManager:
         Previously this was hard-coded to 20s, which made jobs finish quickly even when the
         UI selected a longer auto-finish duration (for example 10 minutes).
         """
-        try:
-            duration_minutes = JobManager._duration_minutes(payload)
-        except (TypeError, ValueError):
-            duration_minutes = 0
+        duration_minutes = JobManager._duration_minutes(payload)
 
         if duration_minutes <= 0:
             sleep_seconds = 20
