@@ -91,6 +91,7 @@ class UartStreamManager:
     def __init__(self) -> None:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._connections: set[WebSocket] = set()
+        self._connections_by_client: dict[str, WebSocket] = {}
         self._buffers: dict[str, dict[str, deque[dict[str, str]]]] = defaultdict(
             lambda: defaultdict(lambda: deque(maxlen=self.MAX_LINES_PER_DEVICE))
         )
@@ -108,13 +109,23 @@ class UartStreamManager:
                 for job_id, by_device in self._buffers.items()
             }
 
-    def register(self, websocket: WebSocket) -> None:
+    def register(self, websocket: WebSocket, client_key: str) -> WebSocket | None:
+        replaced: WebSocket | None = None
         with self._lock:
+            previous = self._connections_by_client.get(client_key)
+            if previous is not None and previous is not websocket:
+                self._connections.discard(previous)
+                replaced = previous
             self._connections.add(websocket)
+            self._connections_by_client[client_key] = websocket
+        return replaced
 
-    def unregister(self, websocket: WebSocket) -> None:
+    def unregister(self, websocket: WebSocket, client_key: str) -> None:
         with self._lock:
             self._connections.discard(websocket)
+            tracked = self._connections_by_client.get(client_key)
+            if tracked is websocket:
+                self._connections_by_client.pop(client_key, None)
 
     def start_capture(self, job_id: str, uart_paths: list[str]) -> None:
         unique_paths = sorted({path.strip() for path in uart_paths if path and path.strip()})
@@ -951,13 +962,18 @@ def index() -> FileResponse:
 @app.websocket("/ws/uart")
 async def ws_uart(websocket: WebSocket) -> None:
     await websocket.accept()
-    uart_stream_manager.register(websocket)
+    client_key = websocket.query_params.get("client_id") or "anonymous"
+    replaced = uart_stream_manager.register(websocket, client_key)
+    if replaced is not None:
+        await replaced.close()
     await websocket.send_json({"type": "snapshot", "jobs": uart_stream_manager.snapshot()})
     try:
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
-        uart_stream_manager.unregister(websocket)
+        pass
+    finally:
+        uart_stream_manager.unregister(websocket, client_key)
 
 
 
