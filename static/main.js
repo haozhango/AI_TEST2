@@ -70,14 +70,18 @@ function connectUartSocket() {
     uartReconnectTimer = null;
   }
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  uartSocket = new WebSocket(`${protocol}//${window.location.host}/ws/uart`);
-  uartSocket.onopen = () => {
+  const clientId = `${currentUserId || '0'}-${window.location.pathname}`;
+  const socket = new WebSocket(`${protocol}//${window.location.host}/ws/uart?client_id=${encodeURIComponent(clientId)}`);
+  uartSocket = socket;
+  socket.onopen = () => {
+    if (uartSocket !== socket) return;
     if (uartPingTimer) window.clearInterval(uartPingTimer);
     uartPingTimer = window.setInterval(() => {
-      if (uartSocket && uartSocket.readyState === WebSocket.OPEN) uartSocket.send('ping');
+      if (uartSocket === socket && socket.readyState === WebSocket.OPEN) socket.send('ping');
     }, 15000);
   };
-  uartSocket.onmessage = (event) => {
+  socket.onmessage = (event) => {
+    if (uartSocket !== socket) return;
     try {
       const msg = JSON.parse(event.data);
       if (msg.type === 'snapshot') {
@@ -96,7 +100,8 @@ function connectUartSocket() {
       }
     } catch (_) {}
   };
-  uartSocket.onclose = () => {
+  socket.onclose = () => {
+    if (uartSocket !== socket) return;
     if (uartPingTimer) {
       window.clearInterval(uartPingTimer);
       uartPingTimer = null;
