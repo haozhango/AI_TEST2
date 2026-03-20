@@ -91,6 +91,7 @@ class UartStreamManager:
     def __init__(self) -> None:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._connections: set[WebSocket] = set()
+        self._connections_by_client: dict[str, WebSocket] = {}
         self._buffers: dict[str, dict[str, deque[dict[str, str]]]] = defaultdict(
             lambda: defaultdict(lambda: deque(maxlen=self.MAX_LINES_PER_DEVICE))
         )
@@ -108,18 +109,34 @@ class UartStreamManager:
                 for job_id, by_device in self._buffers.items()
             }
 
-    def register(self, websocket: WebSocket) -> None:
+    def register(self, websocket: WebSocket, client_key: str) -> WebSocket | None:
+        replaced: WebSocket | None = None
         with self._lock:
+            previous = self._connections_by_client.get(client_key)
+            if previous is not None and previous is not websocket:
+                self._connections.discard(previous)
+                replaced = previous
             self._connections.add(websocket)
+            self._connections_by_client[client_key] = websocket
+        return replaced
 
-    def unregister(self, websocket: WebSocket) -> None:
+    def unregister(self, websocket: WebSocket, client_key: str) -> None:
         with self._lock:
             self._connections.discard(websocket)
+            tracked = self._connections_by_client.get(client_key)
+            if tracked is websocket:
+                self._connections_by_client.pop(client_key, None)
 
     def start_capture(self, job_id: str, uart_paths: list[str]) -> None:
         unique_paths = sorted({path.strip() for path in uart_paths if path and path.strip()})
         if not unique_paths:
             return
+
+        # UART capture is single-owner: only the current running job can hold listeners.
+        with self._lock:
+            previous_job_ids = {running_job_id for running_job_id, _ in self._threads.keys() if running_job_id != job_id}
+        for previous_job_id in previous_job_ids:
+            self.stop_capture(previous_job_id)
 
         for device in unique_paths:
             key = (job_id, device)
@@ -343,6 +360,15 @@ class JobManager:
         job = self._jobs.get(job_id)
         return bool(job and job.run_token == run_token and self._is_running_status(job.status))
 
+    def _wait_prepare_delay(self, job_id: str, run_token: int, delay_seconds: int) -> bool:
+        deadline = time.monotonic() + max(0, delay_seconds)
+        while time.monotonic() < deadline:
+            with self._lock:
+                if not self._job_is_current_locked(job_id, run_token):
+                    return False
+            time.sleep(0.2)
+        return True
+
     def _prepare_and_launch_job(self, job_id: str, run_token: int) -> None:
         with self._lock:
             job = self._jobs.get(job_id)
@@ -376,6 +402,9 @@ class JobManager:
                             self._jobs[job_id].end_time = datetime.now().isoformat(timespec="seconds")
                             self._jobs[job_id].message = f"HAPS_DB load failed (exit={rc1})"
                             self._promote_waiting_locked()
+                    return
+
+                if not self._wait_prepare_delay(job_id, run_token, 20):
                     return
 
                 with self._lock:
@@ -933,13 +962,18 @@ def index() -> FileResponse:
 @app.websocket("/ws/uart")
 async def ws_uart(websocket: WebSocket) -> None:
     await websocket.accept()
-    uart_stream_manager.register(websocket)
+    client_key = websocket.query_params.get("client_id") or "anonymous"
+    replaced = uart_stream_manager.register(websocket, client_key)
+    if replaced is not None:
+        await replaced.close()
     await websocket.send_json({"type": "snapshot", "jobs": uart_stream_manager.snapshot()})
     try:
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
-        uart_stream_manager.unregister(websocket)
+        pass
+    finally:
+        uart_stream_manager.unregister(websocket, client_key)
 
 
 
